@@ -21,7 +21,6 @@ const ProductCardSection = () => {
       transition={{ duration: 0.8, ease: "easeOut" }}
     >
       <div className="container">
-        {/* Top Icon */}
         <div className="row">
           <div className="col-12 text-center">
             <div className="productCard-topIcon">
@@ -34,7 +33,6 @@ const ProductCardSection = () => {
           </div>
         </div>
 
-        {/* Title */}
         <div className="row justify-content-center">
           <div className="col-lg-7 col-md-9 col-12 text-center">
             <h2 className="productCard-title">OUR PRODUCT</h2>
@@ -46,7 +44,6 @@ const ProductCardSection = () => {
           </div>
         </div>
 
-        {/* Swiper Carousel */}
         <div className="productCard-swiperWrap">
           <Swiper
             modules={[Navigation, Autoplay]}
