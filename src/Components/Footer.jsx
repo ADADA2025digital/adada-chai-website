@@ -59,9 +59,9 @@ const Footer = () => {
 
         </div>
 
-        <div className="adada-footer-bottom">
-          <p>Copyright © 2025. All rights Reserved</p>
-        </div>
+      <div className="adada-footer-bottom">
+  <p>Copyright © {new Date().getFullYear()}. All rights Reserved</p>
+</div>
 
       </div>
     </footer>

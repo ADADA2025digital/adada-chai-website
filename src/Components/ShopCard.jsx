@@ -2,11 +2,25 @@ import React from "react";
 import { FaPlus } from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
 
+const slugify = (text) => {
+  return String(text || "")
+    .toLowerCase()
+    .trim()
+    .replace(/&/g, "and")
+    .replace(/[^\w\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-");
+};
+
+const createProductSlug = (product) => {
+  return `${slugify(product.title)}`;
+};
+
 const ShopCard = ({ item, onAddToCart }) => {
   const navigate = useNavigate();
 
   const handleCardClick = () => {
-    navigate(`/product/${item.id}`);
+    navigate(`/product/${createProductSlug(item)}`);
   };
 
   const handleAddClick = (e) => {
@@ -15,7 +29,11 @@ const ShopCard = ({ item, onAddToCart }) => {
   };
 
   return (
-    <div className="shop-card text-center" onClick={handleCardClick}>
+    <div
+      className="shop-card text-center"
+      onClick={handleCardClick}
+      style={{ cursor: "pointer" }}
+    >
       <div className="shop-card-top">
         <img
           src={item.image}

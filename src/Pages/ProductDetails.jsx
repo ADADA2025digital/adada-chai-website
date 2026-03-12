@@ -14,17 +14,36 @@ import {
   FaChevronRight,
 } from "react-icons/fa";
 
+const slugify = (text) => {
+  return String(text || "")
+    .toLowerCase()
+    .trim()
+    .replace(/&/g, "and")
+    .replace(/[^\w\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-");
+};
+
+const createProductSlug = (product) => {
+  return `${slugify(product.title)}`;
+};
+
 const ProductDetails = () => {
-  const { id } = useParams();
+  const { slug } = useParams();
   const navigate = useNavigate();
   const [quantity, setQuantity] = useState(1);
   const [recommendIndex, setRecommendIndex] = useState(0);
 
-  const product = shopData.find((item) => String(item.id) === String(id));
+  const product = shopData.find((item) => {
+    return (
+      String(item.id) === String(slug) || createProductSlug(item) === String(slug)
+    );
+  });
 
   const recommendations = useMemo(() => {
-    return shopData.filter((item) => String(item.id) !== String(id));
-  }, [id]);
+    if (!product) return [];
+    return shopData.filter((item) => item.id !== product.id);
+  }, [product]);
 
   const visibleRecommendations = recommendations.slice(
     recommendIndex,
@@ -40,6 +59,8 @@ const ProductDetails = () => {
   };
 
   const updateCart = (qtyToAdd) => {
+    if (!product) return;
+
     const existingCart = JSON.parse(localStorage.getItem("adadaCart")) || [];
 
     const existingIndex = existingCart.findIndex(
@@ -94,6 +115,7 @@ const ProductDetails = () => {
             <p className="mb-0 text-muted">
               The product you are looking for does not exist.
             </p>
+            <p className="small text-muted mt-2">URL slug: {slug}</p>
           </div>
         </section>
       </div>
@@ -127,7 +149,6 @@ const ProductDetails = () => {
           </div>
 
           <div className="row g-4 g-xl-5 align-items-start">
-            {/* LEFT IMAGE */}
             <div className="col-12 col-lg-4">
               <motion.div
                 className="d-flex justify-content-center align-items-start h-100"
@@ -144,7 +165,6 @@ const ProductDetails = () => {
               </motion.div>
             </div>
 
-            {/* CENTER CONTENT */}
             <div className="col-12 col-md-7 col-lg-4 p-5 p-lg-0">
               <motion.div
                 className="pt-0 pt-lg-4"
@@ -269,34 +289,21 @@ const ProductDetails = () => {
               </motion.div>
             </div>
 
-            {/* RIGHT RECOMMENDATION */}
             <div className="col-12 col-md-5 col-lg-4">
-              <motion.div
-                className="recommendation-card p-3 rounded-4 mx-auto"
-                initial={{ opacity: 0, y: 60 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true, amount: 0.2 }}
-                transition={{ duration: 0.95, delay: 0.15, ease: "easeOut" }}
-              >
+              <motion.div className="recommendation-card p-3 rounded-4 mx-auto">
                 <h5 className="fw-bold mb-3 recommendation-title">
                   Our Recommendation
                 </h5>
 
                 <div className="d-flex flex-column gap-3">
-                  {visibleRecommendations.map((item, index) => (
+                  {visibleRecommendations.map((item) => (
                     <motion.div
                       key={item.id}
                       className="d-flex align-items-start gap-3 recommendation-item"
-                      onClick={() => navigate(`/product/${item.id}`)}
+                      onClick={() =>
+                        navigate(`/product/${createProductSlug(item)}`)
+                      }
                       role="button"
-                      initial={{ opacity: 0, y: 30 }}
-                      whileInView={{ opacity: 1, y: 0 }}
-                      viewport={{ once: true, amount: 0.1 }}
-                      transition={{
-                        duration: 0.6,
-                        delay: index * 0.08,
-                        ease: "easeOut",
-                      }}
                     >
                       <div className="recommend-image-box d-flex align-items-center justify-content-center rounded-3 overflow-hidden flex-shrink-0">
                         <img
@@ -311,8 +318,7 @@ const ProductDetails = () => {
                           {item.title}
                         </h6>
                         <p className="mb-1 recommend-item-desc">
-                          {item.description ||
-                            "Lorem ipsum yuegl uqvgdi vulgi hiehfgj8hgf uegfh"}
+                          {item.description || "Lorem ipsum product description"}
                         </p>
                         <span className="fw-bold recommend-item-price">
                           ${Number(item.price || 0).toFixed(2)}

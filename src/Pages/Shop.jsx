@@ -1,5 +1,6 @@
 import React, { useMemo, useState, useEffect } from "react";
 import { motion } from "framer-motion";
+import { useNavigate } from "react-router-dom";
 import Banner from "../Components/Banner";
 import ShopCard from "../Components/ShopCard.jsx";
 import bannerBg from "../assets/images/about-banner.png";
@@ -7,7 +8,23 @@ import smicon from "../assets/images/smicon.png";
 import { shopData } from "../Constant/data";
 import { FaSearch } from "react-icons/fa";
 
+const slugify = (text) => {
+  return String(text || "")
+    .toLowerCase()
+    .trim()
+    .replace(/&/g, "and")
+    .replace(/[^\w\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-");
+};
+
+const createProductSlug = (product) => {
+  return `${slugify(product.title)}`;
+};
+
 const Shop = () => {
+  const navigate = useNavigate();
+
   const [sortBy, setSortBy] = useState("default");
   const [availability, setAvailability] = useState("all");
   const [status, setStatus] = useState("all");
@@ -34,9 +51,9 @@ const Shop = () => {
     }
 
     if (sortBy === "low-high") {
-      products.sort((a, b) => a.price - b.price);
+      products.sort((a, b) => Number(a.price) - Number(b.price));
     } else if (sortBy === "high-low") {
-      products.sort((a, b) => b.price - a.price);
+      products.sort((a, b) => Number(b.price) - Number(a.price));
     }
 
     return products;
@@ -81,8 +98,11 @@ const Shop = () => {
     }
 
     localStorage.setItem("adadaCart", JSON.stringify(existingCart));
-
     window.dispatchEvent(new Event("cartUpdated"));
+  };
+
+  const handleProductClick = (product) => {
+    navigate(`/product/${createProductSlug(product)}`);
   };
 
   return (
@@ -190,7 +210,11 @@ const Shop = () => {
                     }}
                     className="w-100 d-flex justify-content-center"
                   >
-                    <ShopCard item={item} onAddToCart={handleAddToCart} />
+                    <ShopCard
+                      item={item}
+                      onAddToCart={handleAddToCart}
+                      onClick={() => handleProductClick(item)}
+                    />
                   </motion.div>
                 </div>
               ))
