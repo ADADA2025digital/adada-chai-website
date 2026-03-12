@@ -1,15 +1,36 @@
 import React from "react";
-import badgeIcon from "../assets/images/smicon.png";
+import { FaPlus } from "react-icons/fa";
+import { useNavigate } from "react-router-dom";
 
-const ShopCard = ({ item }) => {
+const ShopCard = ({ item, onAddToCart }) => {
+  const navigate = useNavigate();
+
+  const handleCardClick = () => {
+    navigate(`/product/${item.id}`);
+  };
+
+  const handleAddClick = (e) => {
+    e.stopPropagation();
+    onAddToCart(item);
+  };
+
   return (
-    <div className="shop-card text-center">
+    <div className="shop-card text-center" onClick={handleCardClick}>
       <div className="shop-card-top">
-        <img src={item.image} alt={item.title} className="img-fluid shop-card-image" />
+        <img
+          src={item.image}
+          alt={item.title}
+          className="img-fluid shop-card-image"
+        />
 
-        <div className="shop-card-badge">
-          <img src={badgeIcon} alt="badge" className="shop-card-badge-img" />
-        </div>
+        <button
+          type="button"
+          className="shop-card-badge"
+          onClick={handleAddClick}
+          aria-label={`Add ${item.title} to cart`}
+        >
+          <FaPlus className="shop-card-badge-icon" />
+        </button>
       </div>
 
       <div className="shop-card-bottom">

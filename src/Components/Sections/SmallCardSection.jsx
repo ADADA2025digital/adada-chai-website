@@ -37,7 +37,7 @@ const SmallCardSection = () => {
             slidesPerView={1}
             slidesPerGroup={1}
             autoplay={{
-              delay: 2200,
+              delay: 1000,
               disableOnInteraction: false,
               pauseOnMouseEnter: true,
             }}

@@ -48,12 +48,12 @@ const FeaturesSection = () => {
           <Swiper
             modules={[Navigation, Autoplay]}
             loop={featuresData.length > 4}
-            speed={3000}
+            speed={2000}
             slidesPerView={1}
             slidesPerGroup={1}
             spaceBetween={24}
             autoplay={{
-              delay: 2500,
+              delay: 1000,
               disableOnInteraction: false,
               pauseOnMouseEnter: true,
             }}

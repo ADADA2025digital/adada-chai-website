@@ -64,6 +64,27 @@ const Shop = () => {
     });
   };
 
+  const handleAddToCart = (product) => {
+    const existingCart = JSON.parse(localStorage.getItem("adadaCart")) || [];
+
+    const existingIndex = existingCart.findIndex(
+      (item) => item.id === product.id
+    );
+
+    if (existingIndex !== -1) {
+      existingCart[existingIndex].quantity += 1;
+    } else {
+      existingCart.push({
+        ...product,
+        quantity: 1,
+      });
+    }
+
+    localStorage.setItem("adadaCart", JSON.stringify(existingCart));
+
+    window.dispatchEvent(new Event("cartUpdated"));
+  };
+
   return (
     <div className="container-fluid p-0">
       <Banner
@@ -73,7 +94,6 @@ const Shop = () => {
         bgImage={bannerBg}
       />
 
-      {/* Top Filter Section */}
       <section className="shoptop-section py-5">
         <div className="container">
           <div className="row">
@@ -150,14 +170,13 @@ const Shop = () => {
         </div>
       </section>
 
-      {/* Product Grid */}
       <section className="shop-page-section">
         <div className="container">
           <div className="row pt-4 pt-md-5 gx-3 gy-4 gy-md-5">
             {paginatedProducts.length > 0 ? (
               paginatedProducts.map((item, index) => (
                 <div
-                  className="col-12 col-sm-6 col-md-6 col-lg-4 col-xl-3 p-5 d-flex justify-content-center"
+                  className="col-12 col-sm-6 col-md-6 col-lg-4 col-xl-3 py-5 d-flex justify-content-center"
                   key={item.id}
                 >
                   <motion.div
@@ -171,7 +190,7 @@ const Shop = () => {
                     }}
                     className="w-100 d-flex justify-content-center"
                   >
-                    <ShopCard item={item} />
+                    <ShopCard item={item} onAddToCart={handleAddToCart} />
                   </motion.div>
                 </div>
               ))
@@ -182,7 +201,6 @@ const Shop = () => {
             )}
           </div>
 
-          {/* Pagination */}
           {totalPages > 1 && (
             <div className="row">
               <div className="col-12">

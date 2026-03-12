@@ -39,12 +39,12 @@ const ReviewSection = () => {
           <Swiper
             modules={[Navigation, Autoplay]}
             loop={reviewData.length > 4}
-            speed={3000}
+            speed={2000}
             spaceBetween={24}
             slidesPerView={1}
             slidesPerGroup={1}
             autoplay={{
-              delay: 2600,
+              delay: 1000,
               disableOnInteraction: false,
               pauseOnMouseEnter: true,
             }}

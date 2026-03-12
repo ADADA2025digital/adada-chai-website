@@ -84,9 +84,9 @@ const Home = () => {
             modules={[Autoplay, Pagination]}
             slidesPerView={1}
             loop={true}
-            speed={4000}
+            speed={3000}
             autoplay={{
-              delay: 5000,
+              delay: 3000,
               disableOnInteraction: false,
               pauseOnMouseEnter: false,
             }}

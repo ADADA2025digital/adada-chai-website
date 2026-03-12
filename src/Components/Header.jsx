@@ -14,9 +14,6 @@ import {
   FaShoppingCart,
 } from "react-icons/fa";
 import logo from "../assets/images/logo.png";
-import c1 from "../assets/images/p1.png";
-import c2 from "../assets/images/p1.png";
-import c3 from "../assets/images/p1.png";
 
 const Header = () => {
   const navigate = useNavigate();
@@ -24,33 +21,7 @@ const Header = () => {
   const [showOffcanvas, setShowOffcanvas] = useState(false);
   const [showCartDrawer, setShowCartDrawer] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
-
-  const [cartItems, setCartItems] = useState([
-    {
-      id: 1,
-      title: "1 FLAVOUR CHAI MACHINE",
-      image: c1,
-      price: 100,
-      quantity: 1,
-      description: "Premium chai machine for smooth tea service.",
-    },
-    {
-      id: 2,
-      title: "2 FLAVOUR CHAI MACHINE",
-      image: c2,
-      price: 100,
-      quantity: 1,
-      description: "Dual flavour machine for better serving options.",
-    },
-    {
-      id: 3,
-      title: "3 FLAVOUR CHAI MACHINE",
-      image: c3,
-      price: 100,
-      quantity: 1,
-      description: "Triple flavour chai machine for high demand spaces.",
-    },
-  ]);
+  const [cartItems, setCartItems] = useState([]);
 
   const cartCount = useMemo(
     () => cartItems.reduce((sum, item) => sum + item.quantity, 0),
@@ -81,7 +52,14 @@ const Header = () => {
     ],
   };
 
+  const loadCartFromStorage = () => {
+    const storedCart = JSON.parse(localStorage.getItem("adadaCart")) || [];
+    setCartItems(storedCart);
+  };
+
   useEffect(() => {
+    loadCartFromStorage();
+
     const handleResize = () => {
       if (window.innerWidth > 991) {
         setShowOffcanvas(false);
@@ -92,12 +70,18 @@ const Header = () => {
       setIsScrolled(window.scrollY > 50);
     };
 
+    const handleCartUpdated = () => {
+      loadCartFromStorage();
+    };
+
     window.addEventListener("resize", handleResize);
     window.addEventListener("scroll", handleScroll);
+    window.addEventListener("cartUpdated", handleCartUpdated);
 
     return () => {
       window.removeEventListener("resize", handleResize);
       window.removeEventListener("scroll", handleScroll);
+      window.removeEventListener("cartUpdated", handleCartUpdated);
     };
   }, []);
 
@@ -114,6 +98,7 @@ const Header = () => {
   }, [showOffcanvas, showCartDrawer]);
 
   const openCartDrawer = () => {
+    loadCartFromStorage();
     setShowOffcanvas(false);
     setShowCartDrawer(true);
   };
@@ -122,41 +107,33 @@ const Header = () => {
     setShowCartDrawer(false);
   };
 
+  const updateCartAndStorage = (updatedCart) => {
+    setCartItems(updatedCart);
+    localStorage.setItem("adadaCart", JSON.stringify(updatedCart));
+    window.dispatchEvent(new Event("cartUpdated"));
+  };
+
   const decreaseQty = (id) => {
-    setCartItems((prev) =>
-      prev.map((item) =>
-        item.id === id
-          ? { ...item, quantity: item.quantity > 1 ? item.quantity - 1 : 1 }
-          : item
-      )
+    const updatedCart = cartItems.map((item) =>
+      item.id === id
+        ? { ...item, quantity: item.quantity > 1 ? item.quantity - 1 : 1 }
+        : item
     );
+
+    updateCartAndStorage(updatedCart);
   };
 
   const increaseQty = (id) => {
-    setCartItems((prev) =>
-      prev.map((item) =>
-        item.id === id ? { ...item, quantity: item.quantity + 1 } : item
-      )
+    const updatedCart = cartItems.map((item) =>
+      item.id === id ? { ...item, quantity: item.quantity + 1 } : item
     );
+
+    updateCartAndStorage(updatedCart);
   };
 
   const removeCartItem = (id) => {
-    setCartItems((prev) => prev.filter((item) => item.id !== id));
-  };
-
-  const handleViewCart = () => {
-    setShowCartDrawer(false);
-    navigate("/cart", { state: { cartItems } });
-  };
-
-  const handleCheckout = () => {
-    setShowCartDrawer(false);
-    navigate("/checkout", {
-      state: {
-        cartItems,
-        subTotal,
-      },
-    });
+    const updatedCart = cartItems.filter((item) => item.id !== id);
+    updateCartAndStorage(updatedCart);
   };
 
   return (
@@ -165,7 +142,6 @@ const Header = () => {
         className="adada-header-wrapper position-absolute top-0 start-0 w-100"
         style={{ zIndex: 1000 }}
       >
-        {/* Top Bar */}
         <div
           className={`adada-topbar ${
             isScrolled ? "adada-topbar-hide" : ""
@@ -212,7 +188,6 @@ const Header = () => {
           </div>
         </div>
 
-        {/* Main Nav */}
         <div
           className={`adada-mainnav ${
             isScrolled ? "bg-black adada-mainnav-fixed" : "bg-transparent"
@@ -230,7 +205,6 @@ const Header = () => {
                 </Link>
               </div>
 
-              {/* Desktop Menu */}
               <div className="col-lg-8 d-none d-lg-block">
                 <div className="d-flex justify-content-end">
                   <ul className="adada-nav-pill list-unstyled mb-0 d-flex align-items-center">
@@ -260,7 +234,6 @@ const Header = () => {
                 </div>
               </div>
 
-              {/* Mobile Right Buttons */}
               <div className="col-6 d-lg-none">
                 <div className="d-flex justify-content-end align-items-center gap-2">
                   <button
@@ -290,7 +263,6 @@ const Header = () => {
         </div>
       </header>
 
-      {/* Mobile Menu Backdrop */}
       {showOffcanvas && (
         <div
           className="adada-mobile-backdrop"
@@ -298,23 +270,22 @@ const Header = () => {
         ></div>
       )}
 
-      {/* Mobile Menu */}
       <div className={`adada-mobile-menu ${showOffcanvas ? "show" : ""}`}>
-       <div className="adada-mobile-header d-flex align-items-center justify-content-between">
-  <img
-    src={logo}
-    alt="ADADA CHAI"
-    className="img-fluid adada-mobile-logo"
-  />
+        <div className="adada-mobile-header d-flex align-items-center justify-content-between">
+          <img
+            src={logo}
+            alt="ADADA CHAI"
+            className="img-fluid adada-mobile-logo"
+          />
 
-  <button
-    type="button"
-    className="adada-close-btn"
-    onClick={() => setShowOffcanvas(false)}
-  >
-    <FaTimes />
-  </button>
-</div>
+          <button
+            type="button"
+            className="adada-close-btn"
+            onClick={() => setShowOffcanvas(false)}
+          >
+            <FaTimes />
+          </button>
+        </div>
 
         <div className="adada-mobile-body">
           <ul className="list-unstyled mb-4 text-center">
@@ -361,33 +332,31 @@ const Header = () => {
             </a>
           </div>
 
-         <div className="adada-mobile-socials d-flex flex-column align-items-center justify-content-center text-center">
-  <h6 className="adada-mobile-section-title mb-3">Follow Us</h6>
+          <div className="adada-mobile-socials d-flex flex-column align-items-center justify-content-center text-center">
+            <h6 className="adada-mobile-section-title mb-3">Follow Us</h6>
 
-  <div className="d-flex justify-content-center gap-3">
-    {contactInfo.socials.map((social, index) => (
-      <a
-        key={index}
-        href={social.url}
-        className="adada-social-link"
-        aria-label={social.label}
-        target="_blank"
-        rel="noopener noreferrer"
-      >
-        {social.icon}
-      </a>
-    ))}
-  </div>
-</div>
+            <div className="d-flex justify-content-center gap-3">
+              {contactInfo.socials.map((social, index) => (
+                <a
+                  key={index}
+                  href={social.url}
+                  className="adada-social-link"
+                  aria-label={social.label}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {social.icon}
+                </a>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Cart Backdrop */}
       {showCartDrawer && (
         <div className="adada-cart-backdrop" onClick={closeCartDrawer}></div>
       )}
 
-      {/* Cart Drawer */}
       <div className={`adada-cart-drawer ${showCartDrawer ? "show" : ""}`}>
         <div className="adada-cart-header">
           <h5 className="mb-0">My Cart ({cartCount})</h5>
@@ -414,7 +383,7 @@ const Header = () => {
                   <h6 className="adada-cart-item-title">{item.title}</h6>
                   <p className="adada-cart-item-desc">{item.description}</p>
                   <div className="adada-cart-item-price">
-                    ${item.price.toFixed(2)}
+                    ${Number(item.price).toFixed(2)}
                   </div>
                 </div>
 
@@ -448,29 +417,29 @@ const Header = () => {
             <strong>${subTotal.toFixed(2)}</strong>
           </div>
 
-         <div className="adada-cart-footer-btns">
-  <button
-    type="button"
-    className="adada-cart-action-btn"
-    onClick={() => {
-      closeCartDrawer();
-      navigate("/shop");
-    }}
-  >
-    CONTINUE SHOPPING
-  </button>
+          <div className="adada-cart-footer-btns">
+            <button
+              type="button"
+              className="adada-cart-action-btn"
+              onClick={() => {
+                closeCartDrawer();
+                navigate("/shop");
+              }}
+            >
+              CONTINUE SHOPPING
+            </button>
 
-  <button
-    type="button"
-    className="adada-cart-action-btn"
-    onClick={() => {
-      closeCartDrawer();
-      navigate("/checkout");
-    }}
-  >
-    CHECKOUT
-  </button>
-</div>
+            <button
+              type="button"
+              className="adada-cart-action-btn"
+              onClick={() => {
+                closeCartDrawer();
+                navigate("/checkout");
+              }}
+            >
+              CHECKOUT
+            </button>
+          </div>
         </div>
       </div>
     </>

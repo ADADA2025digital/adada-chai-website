@@ -51,12 +51,12 @@ const ProductCardSection = () => {
           <Swiper
             modules={[Navigation, Autoplay]}
             loop={productCardData.length > 5}
-            speed={3000}
+            speed={2000}
             spaceBetween={20}
             slidesPerView={1}
             slidesPerGroup={1}
             autoplay={{
-              delay: 2500,
+              delay: 1000,
               disableOnInteraction: false,
               pauseOnMouseEnter: true,
             }}
