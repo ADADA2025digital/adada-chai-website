@@ -1,21 +1,42 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
+import ReCAPTCHA from "react-google-recaptcha";
 
-const RentEnquiryForm = ({ productTitle }) => {
+const RentEnquiryForm = ({ productTitle, productId, productsList = [] }) => {
+  const recaptchaRef = useRef(null);
+
   const [formData, setFormData] = useState({
     firstName: "",
     lastName: "",
     email: "",
     phone: "",
     message: "",
+    selectedProductId: productId || "",
+    selectedProductTitle: productTitle || "",
   });
 
   const [errors, setErrors] = useState({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitStatus, setSubmitStatus] = useState({ type: null, message: null });
+
+  const [captchaToken, setCaptchaToken] = useState("");
+  const [captchaError, setCaptchaError] = useState("");
+  const [showRecaptcha, setShowRecaptcha] = useState(false);
 
   const firstNameRegex = /^[A-Za-z\s]{2,30}$/;
   const lastNameRegex = /^[A-Za-z\s]{1,30}$/;
   const emailRegex = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
   const phoneRegex = /^[0-9+\-\s]{8,15}$/;
   const messageRegex = /^.{10,500}$/;
+
+  useEffect(() => {
+    if (productId && productTitle && productsList.length > 0) {
+      setFormData((prev) => ({
+        ...prev,
+        selectedProductId: productId,
+        selectedProductTitle: productTitle,
+      }));
+    }
+  }, [productId, productTitle, productsList]);
 
   const validate = () => {
     const newErrors = {};
@@ -50,6 +71,10 @@ const RentEnquiryForm = ({ productTitle }) => {
       newErrors.message = "Message must be at least 10 characters";
     }
 
+    if (!formData.selectedProductId) {
+      newErrors.selectedProductId = "Please select a product";
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -57,55 +82,203 @@ const RentEnquiryForm = ({ productTitle }) => {
   const handleChange = (e) => {
     const { name, value } = e.target;
 
-    setFormData((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
+    if (name === "selectedProductId") {
+      const selectedProduct = productsList.find((p) => p.id === parseInt(value));
+      setFormData((prev) => ({
+        ...prev,
+        selectedProductId: value,
+        selectedProductTitle: selectedProduct ? selectedProduct.title : "",
+      }));
+    } else {
+      setFormData((prev) => ({
+        ...prev,
+        [name]: value,
+      }));
+    }
 
     setErrors((prev) => ({
       ...prev,
       [name]: "",
     }));
+
+    if (name === "message") {
+      if (value.trim()) {
+        setShowRecaptcha(true);
+      } else if (!captchaToken) {
+        setShowRecaptcha(false);
+      }
+    }
+
+    if (submitStatus.message) {
+      setSubmitStatus({ type: null, message: null });
+    }
   };
 
-  const handleSubmit = (e) => {
+  const handleMessageFocus = () => {
+    setShowRecaptcha(true);
+  };
+
+  const handleMessageBlur = () => {
+    if (!formData.message.trim() && !captchaToken) {
+      setShowRecaptcha(false);
+    }
+  };
+
+  const handleCaptchaChange = (token) => {
+    setCaptchaToken(token || "");
+    setCaptchaError("");
+  };
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
 
-    if (validate()) {
-      const finalPayload = {
-        ...formData,
-        product: productTitle,
+    if (!validate()) return;
+
+    if (!captchaToken) {
+      setCaptchaError("Please verify the reCAPTCHA");
+      setShowRecaptcha(true);
+      return;
+    }
+
+    setIsSubmitting(true);
+    setSubmitStatus({ type: null, message: null });
+
+    try {
+      const payload = {
+        full_name: `${formData.firstName} ${formData.lastName}`.trim(),
+        email: formData.email,
+        phone_number: formData.phone,
+        product_id: parseInt(formData.selectedProductId),
+        query: formData.message,
+        recaptchaToken: captchaToken,
       };
 
-      console.log("Rent enquiry submitted:", finalPayload);
-      alert("Rent enquiry submitted successfully!");
+      const apiUrl = "http://localhost:8000";
 
-      setFormData({
-        firstName: "",
-        lastName: "",
-        email: "",
-        phone: "",
-        message: "",
+      const response = await fetch(`${apiUrl}/api/rent/request`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(payload),
       });
 
-      setErrors({});
+      const data = await response.json();
+
+      if (response.ok && data.status === "success") {
+        setSubmitStatus({
+          type: "success",
+          message:
+            data.message ||
+            "Rent request submitted successfully! We'll contact you shortly.",
+        });
+
+        setFormData({
+          firstName: "",
+          lastName: "",
+          email: "",
+          phone: "",
+          message: "",
+          selectedProductId: "",
+          selectedProductTitle: "",
+        });
+
+        setErrors({});
+        setCaptchaToken("");
+        setCaptchaError("");
+        setShowRecaptcha(false);
+
+        if (recaptchaRef.current) {
+          recaptchaRef.current.reset();
+        }
+
+        setTimeout(() => {
+          setSubmitStatus({ type: null, message: null });
+        }, 5000);
+      } else {
+        if (data.errors) {
+          const apiErrors = {};
+          Object.keys(data.errors).forEach((key) => {
+            apiErrors[key] = data.errors[key][0];
+          });
+
+          setErrors(apiErrors);
+          setSubmitStatus({
+            type: "error",
+            message: "Please check the form for errors.",
+          });
+        } else {
+          throw new Error(data.message || "Failed to submit rent request");
+        }
+      }
+    } catch (error) {
+      console.error("Rent request error:", error);
+      setSubmitStatus({
+        type: "error",
+        message:
+          error.message || "Failed to submit rent request. Please try again later.",
+      });
+
+      setTimeout(() => {
+        setSubmitStatus({ type: null, message: null });
+      }, 5000);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   return (
     <div className="rent-form-card p-3 p-md-4 p-lg-5">
+      {submitStatus.type && (
+        <div
+          className={`alert alert-${
+            submitStatus.type === "success" ? "success" : "danger"
+          } mb-4`}
+          role="alert"
+        >
+          {submitStatus.message}
+        </div>
+      )}
+
       <form onSubmit={handleSubmit}>
         <div className="row g-3">
+          <div className="col-12">
+            <select
+              name="selectedProductId"
+              className={`form-control rent-form-input ${
+                errors.selectedProductId ? "is-invalid" : ""
+              }`}
+              value={formData.selectedProductId}
+              onChange={handleChange}
+              disabled={isSubmitting}
+            >
+              <option value="">Select a product *</option>
+              {productsList.map((product) => (
+                <option key={product.id} value={product.id}>
+                  {product.title} - $
+                  {typeof product.price === "number"
+                    ? product.price.toFixed(2)
+                    : product.price}
+                </option>
+              ))}
+            </select>
+            {errors.selectedProductId && (
+              <div className="rent-form-error">{errors.selectedProductId}</div>
+            )}
+          </div>
+
           <div className="col-md-6 col-12">
             <input
               type="text"
               name="firstName"
-              placeholder="First Name"
+              placeholder="First Name *"
               className={`form-control rent-form-input ${
                 errors.firstName ? "is-invalid" : ""
               }`}
               value={formData.firstName}
               onChange={handleChange}
+              disabled={isSubmitting}
             />
             {errors.firstName && (
               <div className="rent-form-error">{errors.firstName}</div>
@@ -116,12 +289,13 @@ const RentEnquiryForm = ({ productTitle }) => {
             <input
               type="text"
               name="lastName"
-              placeholder="Last Name"
+              placeholder="Last Name *"
               className={`form-control rent-form-input ${
                 errors.lastName ? "is-invalid" : ""
               }`}
               value={formData.lastName}
               onChange={handleChange}
+              disabled={isSubmitting}
             />
             {errors.lastName && (
               <div className="rent-form-error">{errors.lastName}</div>
@@ -130,14 +304,15 @@ const RentEnquiryForm = ({ productTitle }) => {
 
           <div className="col-md-6 col-12">
             <input
-              type="text"
+              type="email"
               name="email"
-              placeholder="Email Address"
+              placeholder="Email Address *"
               className={`form-control rent-form-input ${
                 errors.email ? "is-invalid" : ""
               }`}
               value={formData.email}
               onChange={handleChange}
+              disabled={isSubmitting}
             />
             {errors.email && (
               <div className="rent-form-error">{errors.email}</div>
@@ -146,14 +321,15 @@ const RentEnquiryForm = ({ productTitle }) => {
 
           <div className="col-md-6 col-12">
             <input
-              type="text"
+              type="tel"
               name="phone"
-              placeholder="Phone Number"
+              placeholder="Phone Number *"
               className={`form-control rent-form-input ${
                 errors.phone ? "is-invalid" : ""
               }`}
               value={formData.phone}
               onChange={handleChange}
+              disabled={isSubmitting}
             />
             {errors.phone && (
               <div className="rent-form-error">{errors.phone}</div>
@@ -164,15 +340,33 @@ const RentEnquiryForm = ({ productTitle }) => {
             <textarea
               name="message"
               rows="4"
-              placeholder="Write your query here"
+              placeholder="Write your query here *"
               className={`form-control rent-form-input rent-form-textarea ${
                 errors.message ? "is-invalid" : ""
               }`}
               value={formData.message}
               onChange={handleChange}
+              onFocus={handleMessageFocus}
+              onBlur={handleMessageBlur}
+              disabled={isSubmitting}
             ></textarea>
             {errors.message && (
               <div className="rent-form-error">{errors.message}</div>
+            )}
+          </div>
+
+          <div className="col-12">
+            {showRecaptcha && (
+              <>
+                <ReCAPTCHA
+                  ref={recaptchaRef}
+                  sitekey="6LfTOPoqAAAAALiP94ZP6TEYP5XiTsKjvr7dpYh9"
+                  onChange={handleCaptchaChange}
+                />
+                {captchaError && (
+                  <div className="rent-form-error mt-2">{captchaError}</div>
+                )}
+              </>
             )}
           </div>
 
@@ -180,8 +374,20 @@ const RentEnquiryForm = ({ productTitle }) => {
             <button
               type="submit"
               className="rent-submit-btn w-100 w-md-auto"
+              disabled={isSubmitting}
             >
-              Submit
+              {isSubmitting ? (
+                <>
+                  <span
+                    className="spinner-border spinner-border-sm me-2"
+                    role="status"
+                    aria-hidden="true"
+                  ></span>
+                  Submitting...
+                </>
+              ) : (
+                "Submit"
+              )}
             </button>
           </div>
         </div>

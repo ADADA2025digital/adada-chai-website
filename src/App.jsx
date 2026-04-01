@@ -1,5 +1,5 @@
 import React from "react";
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, useLocation } from "react-router-dom";
 import "./App.css";
 import "bootstrap-icons/font/bootstrap-icons.css";
 import "bootstrap/dist/css/bootstrap.min.css";
@@ -19,12 +19,20 @@ import ContactUs from "./Pages/ContactUs";
 import Rent from "./Pages/Rent.jsx";
 import Checkout from "./Pages/Checkout.jsx";
 import ProductDetails from "./Pages/ProductDetails.jsx";
+import InvoiceView from "./Components/InvoiceView.jsx";
+import InvoiceProxy from "./Components/InvoiceView.jsx";
 
 function App() {
+  const location = useLocation();
+
+  const hideLayout = location.pathname.startsWith("/invoice/");
+
   return (
     <div className="App">
       <ScrollToTop />
-      <Header />
+
+      {!hideLayout && <Header />}
+
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/about" element={<AboutUs />} />
@@ -33,8 +41,10 @@ function App() {
         <Route path="/contact" element={<ContactUs />} />
         <Route path="/rent" element={<Rent />} />
         <Route path="/checkout" element={<Checkout />} />
+        <Route path="/invoice/:action/:token" element={<InvoiceProxy />} />
       </Routes>
-      <Footer />
+
+      {!hideLayout && <Footer />}
     </div>
   );
 }

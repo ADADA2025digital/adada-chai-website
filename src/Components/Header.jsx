@@ -25,20 +25,20 @@ const Header = () => {
 
   const cartCount = useMemo(
     () => cartItems.reduce((sum, item) => sum + item.quantity, 0),
-    [cartItems]
+    [cartItems],
   );
 
   const subTotal = useMemo(
     () => cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0),
-    [cartItems]
+    [cartItems],
   );
 
   const navigationLinks = [
     { to: "/", label: "Home", type: "link" },
     { to: "/about", label: "About", type: "link" },
     { to: "/shop", label: "Shop", type: "link" },
-    { to: "/contact", label: "Contact", type: "link" },
     { to: "/rent", label: "Rent/Lease", type: "link" },
+    { to: "/contact", label: "Contact", type: "link" },
     { to: "/cart", label: `Cart (${cartCount})`, type: "cart" },
   ];
 
@@ -54,7 +54,17 @@ const Header = () => {
 
   const loadCartFromStorage = () => {
     const storedCart = JSON.parse(localStorage.getItem("adadaCart")) || [];
-    setCartItems(storedCart);
+    // Convert price from string to number for each item
+    const processedCart = storedCart.map((item) => ({
+      ...item,
+      price:
+        typeof item.price === "string" ? parseFloat(item.price) : item.price,
+      quantity:
+        typeof item.quantity === "string"
+          ? parseInt(item.quantity)
+          : item.quantity,
+    }));
+    setCartItems(processedCart);
   };
 
   useEffect(() => {
@@ -117,7 +127,7 @@ const Header = () => {
     const updatedCart = cartItems.map((item) =>
       item.id === id
         ? { ...item, quantity: item.quantity > 1 ? item.quantity - 1 : 1 }
-        : item
+        : item,
     );
 
     updateCartAndStorage(updatedCart);
@@ -125,7 +135,7 @@ const Header = () => {
 
   const increaseQty = (id) => {
     const updatedCart = cartItems.map((item) =>
-      item.id === id ? { ...item, quantity: item.quantity + 1 } : item
+      item.id === id ? { ...item, quantity: item.quantity + 1 } : item,
     );
 
     updateCartAndStorage(updatedCart);
@@ -173,13 +183,25 @@ const Header = () => {
 
               <div className="col-lg-6 col-12">
                 <div className="adada-topbar-right d-flex align-items-center justify-content-center justify-content-lg-end mt-2 mt-lg-0">
-                  <a href="#" className="adada-social-link" aria-label="Instagram">
+                  <a
+                    href="#"
+                    className="adada-social-link"
+                    aria-label="Instagram"
+                  >
                     <FaInstagram />
                   </a>
-                  <a href="#" className="adada-social-link" aria-label="WhatsApp">
+                  <a
+                    href="#"
+                    className="adada-social-link"
+                    aria-label="WhatsApp"
+                  >
                     <FaWhatsapp />
                   </a>
-                  <a href="#" className="adada-social-link" aria-label="Facebook">
+                  <a
+                    href="#"
+                    className="adada-social-link"
+                    aria-label="Facebook"
+                  >
                     <FaFacebookF />
                   </a>
                 </div>
@@ -244,7 +266,9 @@ const Header = () => {
                   >
                     <FaShoppingCart />
                     {cartCount > 0 && (
-                      <span className="adada-mobile-cart-count">{cartCount}</span>
+                      <span className="adada-mobile-cart-count">
+                        {cartCount}
+                      </span>
                     )}
                   </button>
 
@@ -376,12 +400,33 @@ const Header = () => {
             cartItems.map((item) => (
               <div className="adada-cart-item" key={item.id}>
                 <div className="adada-cart-item-image">
-                  <img src={item.image} alt={item.title} className="img-fluid" />
+                  <img
+                    src={item.image}
+                    alt={item.title}
+                    className="img-fluid"
+                  />
                 </div>
 
                 <div className="adada-cart-item-content">
                   <h6 className="adada-cart-item-title">{item.title}</h6>
-                  <p className="adada-cart-item-desc">{item.description}</p>
+                  <div
+                    className="adada-cart-item-desc"
+                    dangerouslySetInnerHTML={{
+                      __html: (() => {
+                        // Strip HTML tags to get plain text
+                        const temp = document.createElement("div");
+                        temp.innerHTML = item.description || "";
+                        const plainText =
+                          temp.textContent || temp.innerText || "";
+
+                        // Truncate to 45 characters
+                        if (plainText.length > 40) {
+                          return plainText.substring(0, 40) + "...";
+                        }
+                        return plainText;
+                      })(),
+                    }}
+                  />{" "}
                   <div className="adada-cart-item-price">
                     ${Number(item.price).toFixed(2)}
                   </div>

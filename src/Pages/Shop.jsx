@@ -5,8 +5,8 @@ import Banner from "../Components/Banner";
 import ShopCard from "../Components/ShopCard.jsx";
 import bannerBg from "../assets/images/about-banner.png";
 import smicon from "../assets/images/smicon.png";
-import { shopData } from "../Constant/data";
 import { FaSearch } from "react-icons/fa";
+import { productAPI } from "../Config/route";
 
 const slugify = (text) => {
   return String(text || "")
@@ -24,6 +24,9 @@ const createProductSlug = (product) => {
 
 const Shop = () => {
   const navigate = useNavigate();
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   const [sortBy, setSortBy] = useState("default");
   const [availability, setAvailability] = useState("all");
@@ -33,31 +36,140 @@ const Shop = () => {
 
   const productsPerPage = 12;
 
+  // Fetch products from API
+  useEffect(() => {
+    fetchProducts();
+  }, []);
+
+  const fetchProducts = async () => {
+    try {
+      setLoading(true);
+      const data = await productAPI.getAllProducts();
+      // console.log("Fetched products data:", data);
+
+      // Extract products array
+      let productsArray = [];
+
+      if (Array.isArray(data)) {
+        productsArray = data;
+      } else if (data && typeof data === "object") {
+        if (Array.isArray(data.data)) {
+          productsArray = data.data;
+        } else if (Array.isArray(data.products)) {
+          productsArray = data.products;
+        } else {
+          const values = Object.values(data);
+          if (values.length > 0 && Array.isArray(values[0])) {
+            productsArray = values[0];
+          }
+        }
+      }
+
+      // Transform products to match ShopCard expected format
+      const transformedProducts = productsArray.map((product) => {
+        // Extract image URL from assets
+        let imageUrl = null;
+
+        if (
+          product.assets &&
+          Array.isArray(product.assets) &&
+          product.assets.length > 0
+        ) {
+          const imageAsset = product.assets.find(
+            (asset) => asset.asset_url && asset.asset_type === "image",
+          );
+
+          if (imageAsset && imageAsset.asset_url) {
+            let url = imageAsset.asset_url;
+            if (url.startsWith("/storage") || url.startsWith("storage")) {
+              imageUrl = `http://127.0.0.1:8000/${url}`;
+            } else if (
+              !url.startsWith("http://") &&
+              !url.startsWith("https://")
+            ) {
+              imageUrl = `http://127.0.0.1:8000/storage/${url}`;
+            } else {
+              imageUrl = url;
+            }
+          } else if (product.assets[0] && product.assets[0].asset_url) {
+            let url = product.assets[0].asset_url;
+            if (!url.startsWith("http://") && !url.startsWith("https://")) {
+              imageUrl = `http://127.0.0.1:8000/storage/${url}`;
+            } else {
+              imageUrl = url;
+            }
+          }
+        }
+
+        // Fallback to placeholder
+        if (!imageUrl) {
+          const colors = ["FF6B6B", "4ECDC4", "45B7D1", "96CEB4", "FFEAA7"];
+          const hash = (product.product_name || "")
+            .split("")
+            .reduce((acc, char) => acc + char.charCodeAt(0), 0);
+          const color = colors[hash % colors.length];
+          const text = encodeURIComponent(product.product_name || "Product");
+          imageUrl = `https://via.placeholder.com/300x300/${color}/FFFFFF?text=${text}`;
+        }
+
+        return {
+          id: product.product_id || product.id,
+          title: product.product_name || product.name || "Untitled Product",
+          description:
+            product.description ||
+            product.specification ||
+            "No description available",
+          price: product.sell_price || product.price || 0,
+          image: imageUrl,
+          availability: product.quantity > 0 ? "in-stock" : "out-of-stock",
+          status: product.product_status === "active" ? "new" : "sale",
+          quantity: product.quantity || 0,
+          sku: product.sku,
+          specification: product.specification,
+          discount: product.discount,
+          category: product.category,
+          // Keep original data
+          ...product,
+        };
+      });
+
+      // console.log("Transformed products for shop:", transformedProducts);
+      setProducts(transformedProducts);
+      setError(null);
+    } catch (err) {
+      console.error("Failed to fetch products:", err);
+      setError("Failed to load products. Please try again later.");
+      setProducts([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const filteredProducts = useMemo(() => {
-    let products = [...shopData];
+    let filtered = [...products];
 
     if (availability !== "all") {
-      products = products.filter((item) => item.availability === availability);
+      filtered = filtered.filter((item) => item.availability === availability);
     }
 
     if (status !== "all") {
-      products = products.filter((item) => item.status === status);
+      filtered = filtered.filter((item) => item.status === status);
     }
 
     if (searchTerm.trim()) {
-      products = products.filter((item) =>
-        item.title.toLowerCase().includes(searchTerm.toLowerCase())
+      filtered = filtered.filter((item) =>
+        item.title.toLowerCase().includes(searchTerm.toLowerCase()),
       );
     }
 
     if (sortBy === "low-high") {
-      products.sort((a, b) => Number(a.price) - Number(b.price));
+      filtered.sort((a, b) => Number(a.price) - Number(b.price));
     } else if (sortBy === "high-low") {
-      products.sort((a, b) => Number(b.price) - Number(a.price));
+      filtered.sort((a, b) => Number(b.price) - Number(a.price));
     }
 
-    return products;
-  }, [sortBy, availability, status, searchTerm]);
+    return filtered;
+  }, [products, sortBy, availability, status, searchTerm]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -85,7 +197,7 @@ const Shop = () => {
     const existingCart = JSON.parse(localStorage.getItem("adadaCart")) || [];
 
     const existingIndex = existingCart.findIndex(
-      (item) => item.id === product.id
+      (item) => item.id === product.id,
     );
 
     if (existingIndex !== -1) {
@@ -104,6 +216,48 @@ const Shop = () => {
   const handleProductClick = (product) => {
     navigate(`/product/${createProductSlug(product)}`);
   };
+
+  // Show loading state
+  if (loading) {
+    return (
+      <div className="container-fluid p-0">
+        <Banner
+          title="SHOP"
+          subtitle="Hot chai, always ready."
+          breadcrumb="HOME > SHOP"
+          bgImage={bannerBg}
+        />
+        <section className="shop-page-section">
+          <div className="container text-center py-5">
+            <div className="spinner-border" role="status">
+              <span className="visually-hidden">Loading...</span>
+            </div>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  // Show error state
+  if (error) {
+    return (
+      <div className="container-fluid p-0">
+        <Banner
+          title="SHOP"
+          subtitle="Hot chai, always ready."
+          breadcrumb="HOME > SHOP"
+          bgImage={bannerBg}
+        />
+        <section className="shop-page-section">
+          <div className="container text-center py-5">
+            <div className="alert alert-danger" role="alert">
+              {error}
+            </div>
+          </div>
+        </section>
+      </div>
+    );
+  }
 
   return (
     <div className="container-fluid p-0">
@@ -208,7 +362,7 @@ const Shop = () => {
                       delay: index * 0.08,
                       ease: "easeOut",
                     }}
-                    className="w-100 d-flex justify-content-center"
+          className="w-100 d-flex"
                   >
                     <ShopCard
                       item={item}

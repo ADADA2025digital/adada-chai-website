@@ -1,10 +1,10 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import Banner from "../Components/Banner";
 import bannerBg from "../assets/images/about-banner.png";
 import smicon from "../assets/images/smicon.png";
-import { shopData } from "../Constant/data";
+import { productAPI } from "../Config/route";
 import {
   FaPlus,
   FaMinus,
@@ -28,26 +28,185 @@ const createProductSlug = (product) => {
   return `${slugify(product.title)}`;
 };
 
+// Helper function to sanitize and preserve HTML formatting
+const sanitizeAndPreserveHtml = (html) => {
+  if (!html) return "";
+  
+  // Only remove dangerous tags, preserve formatting
+  return html
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    .replace(/on\w+="[^"]*"/g, '')
+    .replace(/on\w+='[^']*'/g, '')
+    .replace(/javascript:/gi, '');
+};
+
+// Helper function to strip HTML tags and clean text (for meta descriptions)
+const stripHtmlTags = (html) => {
+  if (!html) return "";
+  
+  const tempDiv = document.createElement('div');
+  tempDiv.innerHTML = html;
+  let text = tempDiv.textContent || tempDiv.innerText || '';
+  text = text.replace(/\s+/g, ' ').trim();
+  text = text.replace(/&nbsp;/g, ' ').trim();
+  
+  return text;
+};
+
+// Helper function to safely truncate text if needed
+const truncateText = (text, maxLength) => {
+  if (!text || text.length <= maxLength) return text;
+  return text.substring(0, maxLength) + '...';
+};
+
 const ProductDetails = () => {
   const { slug } = useParams();
   const navigate = useNavigate();
   const [quantity, setQuantity] = useState(1);
   const [recommendIndex, setRecommendIndex] = useState(0);
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  const product = shopData.find((item) => {
-    return (
-      String(item.id) === String(slug) || createProductSlug(item) === String(slug)
-    );
-  });
+  // Fetch all products
+  useEffect(() => {
+    fetchProducts();
+  }, []);
 
+  const fetchProducts = async () => {
+    try {
+      setLoading(true);
+      const data = await productAPI.getAllProducts();
+
+      // Extract products array
+      let productsArray = [];
+
+      if (Array.isArray(data)) {
+        productsArray = data;
+      } else if (data && typeof data === "object") {
+        if (Array.isArray(data.data)) {
+          productsArray = data.data;
+        } else if (Array.isArray(data.products)) {
+          productsArray = data.products;
+        } else {
+          const values = Object.values(data);
+          if (values.length > 0 && Array.isArray(values[0])) {
+            productsArray = values[0];
+          }
+        }
+      }
+
+      // Transform products to match the expected format
+      const transformedProducts = productsArray.map((product) => {
+        // Extract image URL from assets
+        let imageUrl = null;
+
+        if (
+          product.assets &&
+          Array.isArray(product.assets) &&
+          product.assets.length > 0
+        ) {
+          const imageAsset = product.assets.find(
+            (asset) => asset.asset_url && asset.asset_type === "image",
+          );
+
+          if (imageAsset && imageAsset.asset_url) {
+            imageUrl = imageAsset.asset_url;
+          } else if (product.assets[0] && product.assets[0].asset_url) {
+            imageUrl = product.assets[0].asset_url;
+          }
+        }
+
+        // Fallback to placeholder
+        if (!imageUrl) {
+          const colors = ["FF6B6B", "4ECDC4", "45B7D1", "96CEB4", "FFEAA7"];
+          const hash = (product.product_name || "")
+            .split("")
+            .reduce((acc, char) => acc + char.charCodeAt(0), 0);
+          const color = colors[hash % colors.length];
+          const text = encodeURIComponent(product.product_name || "Product");
+          imageUrl = `https://via.placeholder.com/300x300/${color}/FFFFFF?text=${text}`;
+        }
+
+        // Calculate discounted price if discount exists
+        let finalPrice = parseFloat(product.sell_price) || 0;
+        if (product.discount && product.discount.discount_percentage) {
+          const discountPercent = parseFloat(
+            product.discount.discount_percentage,
+          );
+          finalPrice = finalPrice * (1 - discountPercent / 100);
+        }
+
+        // Safely extract category info (handle if category is an object or string)
+        let categoryName = "General";
+        let categoryDescription = "";
+
+        if (product.category) {
+          if (typeof product.category === "object") {
+            categoryName = product.category.category_name || "General";
+            categoryDescription = product.category.category_description || "";
+          } else if (typeof product.category === "string") {
+            categoryName = product.category;
+          }
+        }
+
+        // Preserve HTML formatting for description and specification
+        const cleanDescription = sanitizeAndPreserveHtml(product.description);
+        const cleanSpecification = sanitizeAndPreserveHtml(product.specification);
+        
+        // Strip HTML for category description (used in meta text)
+        const plainCategoryDescription = stripHtmlTags(product.description);
+
+        return {
+          id: product.product_id || product.id,
+          title: product.product_name || product.name || "Untitled Product",
+          description: cleanDescription || "No description available",
+          price: finalPrice,
+          original_price: parseFloat(product.sell_price) || 0,
+          image: imageUrl,
+          availability: product.quantity > 0 ? "In Stock" : "Out of Stock",
+          category: categoryName,
+          categoryDescription: plainCategoryDescription ? truncateText(plainCategoryDescription, 100) : categoryDescription,
+          specification: cleanSpecification || "No specifications available",
+          quantity: product.quantity || 0,
+          sku: product.sku,
+          discount: product.discount,
+          rating: 4.5,
+          reviewCount: 0,
+          product_status: product.product_status,
+        };
+      });
+
+      setProducts(transformedProducts);
+      setError(null);
+    } catch (err) {
+      console.error("Failed to fetch products:", err);
+      setError("Failed to load products. Please try again later.");
+      setProducts([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Find the current product based on slug
+  const product = useMemo(() => {
+    if (!products.length) return null;
+
+    return products.find((item) => {
+      if (String(item.id) === String(slug)) return true;
+      return createProductSlug(item) === String(slug);
+    });
+  }, [products, slug]);
+
+  // Get recommendations (all other products)
   const recommendations = useMemo(() => {
     if (!product) return [];
-    return shopData.filter((item) => item.id !== product.id);
-  }, [product]);
+    return products.filter((item) => item.id !== product.id);
+  }, [product, products]);
 
   const visibleRecommendations = recommendations.slice(
     recommendIndex,
-    recommendIndex + 3
+    recommendIndex + 3,
   );
 
   const handleDecrease = () => {
@@ -64,7 +223,7 @@ const ProductDetails = () => {
     const existingCart = JSON.parse(localStorage.getItem("adadaCart")) || [];
 
     const existingIndex = existingCart.findIndex(
-      (item) => item.id === product.id
+      (item) => item.id === product.id,
     );
 
     if (existingIndex !== -1) {
@@ -99,6 +258,68 @@ const ProductDetails = () => {
     }
   };
 
+  // Render stars based on rating
+  const renderStars = () => {
+    const rating = product?.rating || 4.5;
+    const fullStars = Math.floor(rating);
+    const hasHalfStar = rating % 1 !== 0;
+
+    return (
+      <>
+        {[...Array(fullStars)].map((_, i) => (
+          <FaStar key={`full-${i}`} />
+        ))}
+        {hasHalfStar && <FaStarHalfAlt />}
+        {[...Array(5 - Math.ceil(rating))].map((_, i) => (
+          <FaStar key={`empty-${i}`} style={{ color: "#ddd" }} />
+        ))}
+      </>
+    );
+  };
+
+  // Show loading state
+  if (loading) {
+    return (
+      <div className="container-fluid p-0">
+        <Banner
+          title="PRODUCT DETAILS"
+          subtitle="Find your perfect chai partner."
+          breadcrumb="HOME > SHOP > PRODUCT"
+          bgImage={bannerBg}
+        />
+        <section className="product-details-section py-5">
+          <div className="container text-center py-5">
+            <div className="spinner-border" role="status">
+              <span className="visually-hidden">Loading...</span>
+            </div>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  // Show error state
+  if (error) {
+    return (
+      <div className="container-fluid p-0">
+        <Banner
+          title="PRODUCT DETAILS"
+          subtitle="Find your perfect chai partner."
+          breadcrumb="HOME > SHOP > PRODUCT"
+          bgImage={bannerBg}
+        />
+        <section className="product-details-section py-5">
+          <div className="container text-center py-5">
+            <div className="alert alert-danger" role="alert">
+              {error}
+            </div>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  // Show not found state
   if (!product) {
     return (
       <div className="container-fluid p-0">
@@ -161,6 +382,10 @@ const ProductDetails = () => {
                   src={product.image}
                   alt={product.title}
                   className="img-fluid product-main-image"
+                  onError={(e) => {
+                    e.target.src =
+                      "https://via.placeholder.com/300x300?text=No+Image";
+                  }}
                 />
               </motion.div>
             </div>
@@ -180,44 +405,64 @@ const ProductDetails = () => {
 
                 <div className="d-flex align-items-center flex-wrap gap-2 mb-3">
                   <span className="d-inline-flex align-items-center gap-1 product-stars">
-                    <FaStar />
-                    <FaStar />
-                    <FaStar />
-                    <FaStar />
-                    <FaStarHalfAlt />
+                    {renderStars()}
                   </span>
-                  <span className="small product-meta-text">4.0</span>
-                  <span className="small product-meta-text">5 Review</span>
+                  <span className="small product-meta-text">
+                    {product.rating}
+                  </span>
+                  <span className="small product-meta-text">
+                    {product.reviewCount} Review
+                  </span>
                 </div>
 
                 <div className="fw-bold mb-3 product-price">
-                  ${Number(product.price || 0).toFixed(2)}
+                  ${Number(product.price).toFixed(2)}
+                  {product.original_price > product.price && (
+                    <span className="text-decoration-line-through ms-2 small text-muted">
+                      ${Number(product.original_price).toFixed(2)}
+                    </span>
+                  )}
                 </div>
 
-                <p className="mb-3 product-description">
-                  {product.description ||
-                    "Lorem ipsum yuegl uqvgdi yugduyl yqgwdyl2 byhgdfuyl wuigf hiehfgj8hgf uegfhyu3gf qfghigf iuwefih"}
-                </p>
+                {/* Product description with HTML formatting preserved */}
+                <div 
+                  className="mb-3 product-description"
+                  dangerouslySetInnerHTML={{ __html: product.description }}
+                />
 
                 <div className="mb-3">
                   <p className="mb-1 product-info-text">
-                    <strong>Availability :</strong>{" "}
-                    {product.availability || "In Stock"}
+                    <strong>Availability :</strong> {product.availability}
                   </p>
                   <p className="mb-1 product-info-text">
-                    <strong>Category :</strong>{" "}
-                    {product.category || "Chai Machine"}
+                    <strong>Category :</strong> {product.category}
                   </p>
-                  <p className="mb-1 product-info-text">
-                    <strong>Category Description :</strong>{" "}
-                    {product.categoryDescription ||
-                      "Premium vending solution for tea service"}
-                  </p>
-                  <p className="mb-1 product-info-text">
-                    <strong>Specification :</strong>{" "}
-                    {product.specification ||
-                      "Reliable performance, easy maintenance, premium quality"}
-                  </p>
+                  {product.categoryDescription && (
+                    <p className="mb-1 product-info-text">
+                      <strong>Category Description :</strong>{" "}
+                      {product.categoryDescription}
+                    </p>
+                  )}
+                  
+                  {/* Specification with HTML formatting preserved */}
+                  {product.specification && (
+                    <>
+                      <p className="mb-1 product-info-text">
+                        <strong>Specification :</strong>
+                      </p>
+                      <div 
+                        className="mb-1 product-info-text product-specification"
+                        dangerouslySetInnerHTML={{ __html: product.specification }}
+                      />
+                    </>
+                  )}
+                  
+                  {product.discount && product.discount.discount_percentage && (
+                    <p className="mb-1 product-info-text">
+                      <strong>Discount :</strong>{" "}
+                      {product.discount.discount_percentage}% off
+                    </p>
+                  )}
                 </div>
 
                 <div className="d-flex flex-column flex-md-row align-items-stretch align-items-md-center gap-2 gap-md-3 w-100">
@@ -304,12 +549,22 @@ const ProductDetails = () => {
                         navigate(`/product/${createProductSlug(item)}`)
                       }
                       role="button"
+                      style={{ cursor: "pointer" }}
                     >
                       <div className="recommend-image-box d-flex align-items-center justify-content-center rounded-3 overflow-hidden flex-shrink-0">
                         <img
                           src={item.image}
                           alt={item.title}
                           className="img-fluid recommend-image"
+                          style={{
+                            width: "80px",
+                            height: "80px",
+                            objectFit: "cover",
+                          }}
+                          onError={(e) => {
+                            e.target.src =
+                              "https://via.placeholder.com/80x80?text=No+Image";
+                          }}
                         />
                       </div>
 
@@ -317,35 +572,40 @@ const ProductDetails = () => {
                         <h6 className="fw-bold mb-1 recommend-item-title">
                           {item.title}
                         </h6>
-                        <p className="mb-1 recommend-item-desc">
-                          {item.description || "Lorem ipsum product description"}
-                        </p>
+                        <div 
+                          className="mb-1 recommend-item-desc"
+                          dangerouslySetInnerHTML={{ 
+                            __html: stripHtmlTags(item.description).substring(0, 60) + "..."
+                          }}
+                        />
                         <span className="fw-bold recommend-item-price">
-                          ${Number(item.price || 0).toFixed(2)}
+                          ${Number(item.price).toFixed(2)}
                         </span>
                       </div>
                     </motion.div>
                   ))}
                 </div>
 
-                <div className="d-flex justify-content-end gap-2 mt-3">
-                  <button
-                    type="button"
-                    onClick={handlePrevRecommendation}
-                    disabled={recommendIndex === 0}
-                    className="btn btn-sm recommendation-nav-btn"
-                  >
-                    <FaChevronLeft />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleNextRecommendation}
-                    disabled={recommendIndex + 3 >= recommendations.length}
-                    className="btn btn-sm recommendation-nav-btn"
-                  >
-                    <FaChevronRight />
-                  </button>
-                </div>
+                {recommendations.length > 3 && (
+                  <div className="d-flex justify-content-end gap-2 mt-3">
+                    <button
+                      type="button"
+                      onClick={handlePrevRecommendation}
+                      disabled={recommendIndex === 0}
+                      className="btn btn-sm recommendation-nav-btn"
+                    >
+                      <FaChevronLeft />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleNextRecommendation}
+                      disabled={recommendIndex + 3 >= recommendations.length}
+                      className="btn btn-sm recommendation-nav-btn"
+                    >
+                      <FaChevronRight />
+                    </button>
+                  </div>
+                )}
               </motion.div>
             </div>
           </div>
