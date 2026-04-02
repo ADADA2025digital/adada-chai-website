@@ -23,8 +23,9 @@ const Header = () => {
   const [isScrolled, setIsScrolled] = useState(false);
   const [cartItems, setCartItems] = useState([]);
 
+  // Fixed: Count unique products instead of total quantity
   const cartCount = useMemo(
-    () => cartItems.reduce((sum, item) => sum + item.quantity, 0),
+    () => cartItems.length,
     [cartItems],
   );
 
