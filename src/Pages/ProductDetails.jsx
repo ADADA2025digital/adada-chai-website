@@ -14,10 +14,6 @@ import {
   FaChevronRight,
 } from "react-icons/fa";
 
-import { Swiper, SwiperSlide } from "swiper/react";
-import { Autoplay } from "swiper/modules";
-import "swiper/css";
-
 const slugify = (text) => {
   return String(text || "")
     .toLowerCase()
@@ -68,7 +64,9 @@ const ProductDetails = () => {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [imageSwiper, setImageSwiper] = useState(null);
+
+  const [thumbStartIndex, setThumbStartIndex] = useState(0);
+  const [selectedImage, setSelectedImage] = useState("");
 
   useEffect(() => {
     fetchProducts();
@@ -205,6 +203,24 @@ const ProductDetails = () => {
     recommendIndex + 3,
   );
 
+  const allImages = product?.images?.length
+    ? product.images
+    : product?.image
+      ? [product.image]
+      : [];
+
+  const visibleThumbs = allImages.slice(thumbStartIndex, thumbStartIndex + 3);
+
+  useEffect(() => {
+    if (allImages.length > 0) {
+      setSelectedImage(allImages[0]);
+      setThumbStartIndex(0);
+    } else {
+      setSelectedImage("");
+      setThumbStartIndex(0);
+    }
+  }, [product]);
+
   const handleDecrease = () => {
     setQuantity((prev) => (prev > 1 ? prev - 1 : 1));
   };
@@ -254,15 +270,13 @@ const ProductDetails = () => {
     }
   };
 
-  const handlePrevImage = () => {
-    if (imageSwiper) {
-      imageSwiper.slidePrev();
-    }
+  const handlePrevThumbs = () => {
+    setThumbStartIndex((prev) => Math.max(prev - 3, 0));
   };
 
-  const handleNextImage = () => {
-    if (imageSwiper) {
-      imageSwiper.slideNext();
+  const handleNextThumbs = () => {
+    if (thumbStartIndex + 3 < allImages.length) {
+      setThumbStartIndex((prev) => prev + 3);
     }
   };
 
@@ -383,51 +397,87 @@ const ProductDetails = () => {
                 transition={{ duration: 0.85, ease: "easeOut" }}
               >
                 <div style={{ width: "100%", maxWidth: "420px" }}>
-                  <Swiper
-                    modules={[Autoplay]}
-                    slidesPerView={1}
-                    spaceBetween={10}
-                    loop={product.images?.length > 1}
-                    onSwiper={setImageSwiper}
-                    className="product-image-swiper"
-                  >
-                    {(product.images || [product.image]).map((img, index) => (
-                      <SwiperSlide key={index}>
-                        <img
-                          src={img}
-                          alt={`${product.title} ${index + 1}`}
-                          className="img-fluid product-main-image"
-                          style={{
-                            width: "100%",
-                            height: "420px",
-                            objectFit: "cover",
-                            borderRadius: "16px",
-                          }}
-                          onError={(e) => {
-                            e.target.src =
-                              "https://via.placeholder.com/300x300?text=No+Image";
-                          }}
-                        />
-                      </SwiperSlide>
-                    ))}
-                  </Swiper>
+                  <img
+                    src={selectedImage || product.image}
+                    alt={product.title}
+                    className="img-fluid product-main-image"
+                    style={{
+                      width: "100%",
+                      height: "420px",
+                      objectFit: "cover",
+                      borderRadius: "16px",
+                    }}
+                    onError={(e) => {
+                      e.target.src =
+                        "https://via.placeholder.com/300x300?text=No+Image";
+                    }}
+                  />
 
-                  {product.images?.length > 1 && (
-                    <div className="d-flex justify-content-center gap-2 mt-3">
-                      <button
-                        type="button"
-                        onClick={handlePrevImage}
-                        className="btn btn-sm recommendation-nav-btn"
-                      >
-                        <FaChevronLeft />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleNextImage}
-                        className="btn btn-sm recommendation-nav-btn"
-                      >
-                        <FaChevronRight />
-                      </button>
+                  {allImages.length > 0 && (
+                    <div className="mt-3">
+                      <div className="row g-2">
+                        {visibleThumbs.map((img, index) => {
+                          const actualIndex = thumbStartIndex + index;
+                          const isActive = selectedImage === img;
+
+                          return (
+                            <div className="col-4" key={actualIndex}>
+                              <div
+                                onClick={() => setSelectedImage(img)}
+                                style={{
+                                  cursor: "pointer",
+                                  borderRadius: "12px",
+                                  overflow: "hidden",
+                                  border: isActive
+                                    ? "2px solid #d9932f"
+                                    : "1px solid #e5d3bd",
+                                  background: "#fff",
+                                  transition: "all 0.3s ease",
+                                }}
+                              >
+                                <img
+                                  src={img}
+                                  alt={`${product.title} thumbnail ${
+                                    actualIndex + 1
+                                  }`}
+                                  className="img-fluid"
+                                  style={{
+                                    width: "100%",
+                                    height: "120px",
+                                    objectFit: "cover",
+                                    display: "block",
+                                  }}
+                                  onError={(e) => {
+                                    e.target.src =
+                                      "https://via.placeholder.com/120x120?text=No+Image";
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {allImages.length > 3 && (
+                        <div className="d-flex justify-content-center gap-2 mt-3">
+                          <button
+                            type="button"
+                            onClick={handlePrevThumbs}
+                            disabled={thumbStartIndex === 0}
+                            className="btn btn-sm recommendation-nav-btn"
+                          >
+                            <FaChevronLeft />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleNextThumbs}
+                            disabled={thumbStartIndex + 3 >= allImages.length}
+                            className="btn btn-sm recommendation-nav-btn"
+                          >
+                            <FaChevronRight />
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
