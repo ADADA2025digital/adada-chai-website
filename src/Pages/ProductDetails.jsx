@@ -124,12 +124,12 @@ const ProductDetails = () => {
           imageUrls = [fallbackImage];
         }
 
+        let discountPercentage = 0;
         let finalPrice = parseFloat(product.sell_price) || 0;
+        
         if (product.discount && product.discount.discount_percentage) {
-          const discountPercent = parseFloat(
-            product.discount.discount_percentage,
-          );
-          finalPrice = finalPrice * (1 - discountPercent / 100);
+          discountPercentage = parseFloat(product.discount.discount_percentage);
+          finalPrice = finalPrice * (1 - discountPercentage / 100);
         }
 
         let categoryName = "General";
@@ -150,12 +150,16 @@ const ProductDetails = () => {
         );
         const plainCategoryDescription = stripHtmlTags(product.description);
 
+        // Extract dimensions from the product object
+        const dimensions = product.dimensions || {};
+        
         return {
           id: product.product_id || product.id,
           title: product.product_name || product.name || "Untitled Product",
           description: cleanDescription || "No description available",
           price: finalPrice,
           original_price: parseFloat(product.sell_price) || 0,
+          discount_percentage: discountPercentage,
           image: imageUrls[0],
           images: imageUrls,
           availability: product.quantity > 0 ? "In Stock" : "Out of Stock",
@@ -170,6 +174,11 @@ const ProductDetails = () => {
           rating: 4.5,
           reviewCount: 0,
           product_status: product.product_status,
+          // Add dimensions
+          height: dimensions.height || product.height || null,
+          width: dimensions.width || product.width || null,
+          length: dimensions.length || product.length || null,
+          weight: dimensions.weight || product.weight || null,
         };
       });
 
@@ -512,9 +521,23 @@ const ProductDetails = () => {
                 <div className="fw-bold mb-3 product-price">
                   ${Number(product.price).toFixed(2)}
                   {product.original_price > product.price && (
-                    <span className="text-decoration-line-through ms-2 small text-muted">
-                      ${Number(product.original_price).toFixed(2)}
-                    </span>
+                    <>
+                      <span className="text-decoration-line-through ms-2 small text-muted">
+                        ${Number(product.original_price).toFixed(2)}
+                      </span>
+                      {product.discount_percentage > 0 && (
+                        <span className="ms-2" style={{ 
+                          backgroundColor: "#d9932f", 
+                          color: "#fff", 
+                          padding: "2px 8px", 
+                          borderRadius: "20px",
+                          fontSize: "12px",
+                          fontWeight: "600"
+                        }}>
+                          {product.discount_percentage}% OFF
+                        </span>
+                      )}
+                    </>
                   )}
                 </div>
 
@@ -552,12 +575,44 @@ const ProductDetails = () => {
                     </>
                   )}
 
-                  {product.discount && product.discount.discount_percentage && (
-                    <p className="mb-1 product-info-text">
+                                    {product.discount && product.discount.discount_percentage && (
+                    <p className="mb-1 product-info-text mt-2">
                       <strong>Discount :</strong>{" "}
                       {product.discount.discount_percentage}% off
                     </p>
                   )}
+
+                  {/* Dimensions Section */}
+                  {(product.height || product.width || product.length || product.weight) && (
+                    <div className="mt-3 pt-2">
+                      <h6 className="fw-bold mb-2" style={{ color: "#8f6238", fontSize: "14px" }}>
+                        Dimensions
+                      </h6>
+                      <div className="dimensions-grid" style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "8px" }}>
+                        {product.height && (
+                          <p className="mb-1 product-info-text" style={{ fontSize: "13px" }}>
+                            <strong>Height :</strong> {product.height} {product.height && !isNaN(product.height) && parseFloat(product.height) < 100 ? "cm" : ""}
+                          </p>
+                        )}
+                        {product.width && (
+                          <p className="mb-1 product-info-text" style={{ fontSize: "13px" }}>
+                            <strong>Width :</strong> {product.width} {product.width && !isNaN(product.width) && parseFloat(product.width) < 100 ? "cm" : ""}
+                          </p>
+                        )}
+                        {product.length && (
+                          <p className="mb-1 product-info-text" style={{ fontSize: "13px" }}>
+                            <strong>Length :</strong> {product.length} {product.length && !isNaN(product.length) && parseFloat(product.length) < 100 ? "cm" : ""}
+                          </p>
+                        )}
+                        {product.weight && (
+                          <p className="mb-1 product-info-text" style={{ fontSize: "13px" }}>
+                            <strong>Weight :</strong> {product.weight} {product.weight && !isNaN(product.weight) && parseFloat(product.weight) < 1 ? "kg" : "g"}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                 </div>
 
                 <div className="d-flex flex-column flex-md-row align-items-stretch align-items-md-center gap-2 gap-md-3 w-100">

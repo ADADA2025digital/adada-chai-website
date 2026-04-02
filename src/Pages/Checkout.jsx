@@ -443,20 +443,15 @@ const PaymentForm = forwardRef(
     // Expose reset method to parent component
     useImperativeHandle(ref, () => ({
       resetForm: () => {
-        // Clear CardElement
         if (elements) {
           const cardElement = elements.getElement(CardElement);
           if (cardElement) {
             cardElement.clear();
           }
         }
-
-        // Reset reCAPTCHA
         if (recaptchaRef.current) {
           recaptchaRef.current.reset();
         }
-
-        // Clear all payment-related states
         setCaptchaToken("");
         setCaptchaError("");
         setShowRecaptcha(false);
@@ -495,23 +490,19 @@ const PaymentForm = forwardRef(
         }
 
         const calculatedTotal = cartItems.reduce((sum, item) => {
-          const price = parseFloat(item.price);
-          const quantity = parseInt(item.quantity, 10);
-          return sum + price * quantity;
+          const originalPrice = parseFloat(item.price);
+          const discountPercent = item.discount ? parseFloat(item.discount) : 0;
+          const finalPrice = discountPercent > 0 
+            ? originalPrice * (1 - discountPercent / 100)
+            : originalPrice;
+          return sum + finalPrice * parseInt(item.quantity, 10);
         }, 0);
 
         if (calculatedTotal <= 0) {
-          throw new Error(
-            "Invalid total amount. Please check your cart items.",
-          );
+          throw new Error("Invalid total amount. Please check your cart items.");
         }
 
-        if (
-          !formData.firstName ||
-          !formData.lastName ||
-          !formData.email ||
-          !formData.phone
-        ) {
+        if (!formData.firstName || !formData.lastName || !formData.email || !formData.phone) {
           throw new Error("Please fill in all required fields");
         }
 
@@ -520,9 +511,7 @@ const PaymentForm = forwardRef(
         }
 
         if (!captchaToken) {
-          setCaptchaError(
-            "Please verify the reCAPTCHA before placing your order.",
-          );
+          setCaptchaError("Please verify the reCAPTCHA before placing your order.");
           setShowRecaptcha(true);
           throw new Error("Please complete the reCAPTCHA verification.");
         }
@@ -540,9 +529,7 @@ const PaymentForm = forwardRef(
         );
 
         if (invalidItems.length > 0) {
-          throw new Error(
-            "Some items in your cart are invalid. Please remove them and try again.",
-          );
+          throw new Error("Some items in your cart are invalid. Please remove them and try again.");
         }
 
         const fullAddress = addressInputRef.current?.value?.trim() || "";
@@ -551,49 +538,50 @@ const PaymentForm = forwardRef(
           email: formData.email,
           full_name: `${formData.firstName} ${formData.lastName}`.trim(),
           ph_number: formData.phone,
-
           street_no: formData.streetNo,
           street_name: formData.streetName,
           suburb: formData.suburb,
           state: formData.state,
           postal_code: formData.postalCode,
           country: formData.country,
-
           address_line1: fullAddress || formData.streetName,
           city: formData.suburb,
-
-          products: cartItems.map((item) => ({
-            product_id: parseInt(item.id, 10),
-            quantity: parseInt(item.quantity, 10),
-            price: parseFloat(item.price),
-          })),
-
+          products: cartItems.map((item) => {
+            const originalPrice = parseFloat(item.price);
+            const discountPercent = item.discount ? parseFloat(item.discount) : 0;
+            const finalPrice = discountPercent > 0 
+              ? originalPrice * (1 - discountPercent / 100)
+              : originalPrice;
+            
+            return {
+              product_id: parseInt(item.id, 10),
+              quantity: parseInt(item.quantity, 10),
+              price: finalPrice,
+              original_price: originalPrice,
+              discount_percent: discountPercent,
+              discount_name: item.discount_name || null,
+            };
+          }),
           card_number: token.id,
           exp_month: 12,
           exp_year: new Date().getFullYear() + 1,
           cvc: "123",
-
           recaptchaToken: captchaToken,
         };
 
         const result = await orderAPI.placeGuestOrder(orderData);
 
         if (result?.status === "success") {
-          // Reset all payment-related fields
           if (recaptchaRef.current) {
             recaptchaRef.current.reset();
           }
-
-          // Clear CardElement
           if (cardElement) {
             cardElement.clear();
           }
-
           setCaptchaToken("");
           setCaptchaError("");
           setShowRecaptcha(false);
           setCardError("");
-
           onSuccess(result);
         } else {
           throw new Error(result?.message || "Failed to process order");
@@ -601,10 +589,8 @@ const PaymentForm = forwardRef(
       } catch (err) {
         if (err.response) {
           if (err.response.status === 422) {
-            const validationErrors =
-              err.response.data.errors || err.response.data;
+            const validationErrors = err.response.data.errors || err.response.data;
             let errorMessage = "Validation failed: ";
-
             if (typeof validationErrors === "object") {
               const errorList = [];
               Object.values(validationErrors).forEach((errors) => {
@@ -618,7 +604,6 @@ const PaymentForm = forwardRef(
             } else {
               errorMessage = "Please check all required fields.";
             }
-
             onError(errorMessage);
           } else if (err.response.data?.message) {
             onError(err.response.data.message);
@@ -630,9 +615,7 @@ const PaymentForm = forwardRef(
         } else if (err.message) {
           onError(err.message);
         } else {
-          onError(
-            "Failed to place order. Please check your details and try again.",
-          );
+          onError("Failed to place order. Please check your details and try again.");
         }
       } finally {
         setProcessingPayment(false);
@@ -642,17 +625,31 @@ const PaymentForm = forwardRef(
 
     const handleSubmit = async (e) => {
       e.preventDefault();
-
       if (!captchaToken) {
         setShowRecaptcha(true);
-        setCaptchaError(
-          "Please verify the reCAPTCHA before placing your order.",
-        );
+        setCaptchaError("Please verify the reCAPTCHA before placing your order.");
         return;
       }
-
       await processOrder();
     };
+
+    // Calculate discount summary
+    const discountSummary = useMemo(() => {
+      const totalOriginal = cartItems.reduce((sum, item) => {
+        return sum + (parseFloat(item.price) * item.quantity);
+      }, 0);
+      
+      const totalDiscount = cartItems.reduce((sum, item) => {
+        const originalPrice = parseFloat(item.price);
+        const discountPercent = item.discount ? parseFloat(item.discount) : 0;
+        const discountAmount = discountPercent > 0 
+          ? originalPrice * (discountPercent / 100) * item.quantity
+          : 0;
+        return sum + discountAmount;
+      }, 0);
+      
+      return { totalOriginal, totalDiscount, finalTotal: subTotal };
+    }, [cartItems, subTotal]);
 
     return (
       <form onSubmit={handleSubmit}>
@@ -753,28 +750,12 @@ const PaymentForm = forwardRef(
                     />
                   </div>
 
-                  <input
-                    type="hidden"
-                    name="streetNo"
-                    value={formData.streetNo}
-                  />
-                  <input
-                    type="hidden"
-                    name="streetName"
-                    value={formData.streetName}
-                  />
+                  <input type="hidden" name="streetNo" value={formData.streetNo} />
+                  <input type="hidden" name="streetName" value={formData.streetName} />
                   <input type="hidden" name="suburb" value={formData.suburb} />
                   <input type="hidden" name="state" value={formData.state} />
-                  <input
-                    type="hidden"
-                    name="postalCode"
-                    value={formData.postalCode}
-                  />
-                  <input
-                    type="hidden"
-                    name="country"
-                    value={formData.country}
-                  />
+                  <input type="hidden" name="postalCode" value={formData.postalCode} />
+                  <input type="hidden" name="country" value={formData.country} />
                 </div>
 
                 <div className="checkout-divider"></div>
@@ -791,7 +772,6 @@ const PaymentForm = forwardRef(
                         onFocus={() => setShowRecaptcha(true)}
                       />
                     </div>
-
                     {cardError && (
                       <div className="text-danger mt-2 small">{cardError}</div>
                     )}
@@ -830,78 +810,129 @@ const PaymentForm = forwardRef(
                 {cartItems.length === 0 ? (
                   <div className="checkout-empty-cart">Your cart is empty.</div>
                 ) : (
-                  cartItems.map((item, index) => (
-                    <motion.div
-                      className={`checkout-order-item ${
-                        index !== cartItems.length - 1 ? "with-border" : ""
-                      }`}
-                      key={item.id}
-                      initial={{ opacity: 0, y: 30 }}
-                      whileInView={{ opacity: 1, y: 0 }}
-                      viewport={{ once: true, amount: 0.1 }}
-                      transition={{
-                        duration: 0.6,
-                        delay: index * 0.08,
-                        ease: "easeOut",
-                      }}
-                    >
-                      <div className="checkout-order-left">
-                        <div className="checkout-order-image">
-                          <img
-                            src={item.image}
-                            alt={item.title}
-                            className="img-fluid"
-                          />
-                        </div>
+                  cartItems.map((item, index) => {
+                    const hasDiscount = item.discount && parseFloat(item.discount) > 0;
+                    const originalPrice = parseFloat(item.price);
+                    const discountPercent = hasDiscount ? parseFloat(item.discount) : 0;
+                    const discountedPrice = hasDiscount 
+                      ? originalPrice * (1 - discountPercent / 100)
+                      : originalPrice;
+                    const savings = originalPrice - discountedPrice;
+                    
+                    return (
+                      <motion.div
+                        className={`checkout-order-item ${
+                          index !== cartItems.length - 1 ? "with-border" : ""
+                        }`}
+                        key={item.id}
+                        initial={{ opacity: 0, y: 30 }}
+                        whileInView={{ opacity: 1, y: 0 }}
+                        viewport={{ once: true, amount: 0.1 }}
+                        transition={{
+                          duration: 0.6,
+                          delay: index * 0.08,
+                          ease: "easeOut",
+                        }}
+                      >
+                        <div className="checkout-order-left">
+                          <div className="checkout-order-image">
+                            <img
+                              src={item.image}
+                              alt={item.title}
+                              className="img-fluid"
+                            />
+                          </div>
 
-                        <div className="checkout-order-info">
-                          <h6 className="checkout-product-title mb-2">
-                            {item.title}
-                          </h6>
+                          <div className="checkout-order-info">
+                            <h6 className="checkout-product-title mb-2">
+                              {item.title}
+                            </h6>
 
-                          <div className="checkout-qty-box">
-                            <button
-                              type="button"
-                              onClick={() => formData.decreaseQty(item.id)}
-                              disabled={loading || processingPayment}
-                            >
-                              <FaMinus />
-                            </button>
-                            <span>
-                              {String(item.quantity).padStart(2, "0")}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => formData.increaseQty(item.id)}
-                              disabled={loading || processingPayment}
-                            >
-                              <FaPlus />
-                            </button>
+                            {hasDiscount && (
+                              <div className="discount-badge mb-2">
+                                <span className="discount-percent">
+                                  {discountPercent}% OFF
+                                </span>
+                                <span className="discount-label">
+                                  {item.discount_name || 'Discount'}
+                                </span>
+                              </div>
+                            )}
+
+                            <div className="checkout-qty-box">
+                              <button
+                                type="button"
+                                onClick={() => formData.decreaseQty(item.id)}
+                                disabled={loading || processingPayment}
+                              >
+                                <FaMinus />
+                              </button>
+                              <span>
+                                {String(item.quantity).padStart(2, "0")}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => formData.increaseQty(item.id)}
+                                disabled={loading || processingPayment}
+                              >
+                                <FaPlus />
+                              </button>
+                            </div>
                           </div>
                         </div>
-                      </div>
 
-                      <div className="checkout-order-right">
-                        <div className="checkout-item-price">
-                          $
-                          {typeof item.price === "number"
-                            ? item.price.toFixed(2)
-                            : parseFloat(item.price).toFixed(2)}
+                        <div className="checkout-order-right">
+                          <div className="checkout-item-price d-flex gap-1">
+                            {hasDiscount ? (
+                              <>
+                                <span className="original-price text-muted text-decoration-line-through">
+                                  ${originalPrice.toFixed(2)}
+                                </span>
+                                <span className="discounted-price">
+                                  ${discountedPrice.toFixed(2)}
+                                </span>
+                                {savings > 0 && (
+                                  <span className="savings-amount">
+                                    Save ${savings.toFixed(2)}
+                                  </span>
+                                )}
+                              </>
+                            ) : (
+                              <span className="regular-price">${originalPrice.toFixed(2)}</span>
+                            )}
+                          </div>
+
+                          <button
+                            type="button"
+                            className="checkout-delete-btn"
+                            onClick={() => formData.removeCartItem(item.id)}
+                            disabled={loading || processingPayment}
+                          >
+                            <FaTrash />
+                          </button>
                         </div>
-
-                        <button
-                          type="button"
-                          className="checkout-delete-btn"
-                          onClick={() => formData.removeCartItem(item.id)}
-                          disabled={loading || processingPayment}
-                        >
-                          <FaTrash />
-                        </button>
-                      </div>
-                    </motion.div>
-                  ))
+                      </motion.div>
+                    );
+                  })
                 )}
               </div>
+
+              {discountSummary.totalDiscount > 0 && (
+                <div className="discount-summary">
+                  <div className="summary-row">
+                    <span>Original Total:</span>
+                    <span className="original-total">${discountSummary.totalOriginal.toFixed(2)}</span>
+                  </div>
+                  <div className="summary-row discount-row">
+                    <span>Discount Saved:</span>
+                    <span className="discount-saved">-${discountSummary.totalDiscount.toFixed(2)}</span>
+                  </div>
+                  <div className="summary-row final-total-row">
+                    <span>Final Total:</span>
+                    <span className="final-total">${discountSummary.finalTotal.toFixed(2)}</span>
+                  </div>
+                </div>
+              )}
 
               <div className="checkout-footer">
                 <div className="checkout-subtotal">
@@ -913,29 +944,16 @@ const PaymentForm = forwardRef(
                   <button
                     type="submit"
                     className="checkout-btn primary-btn"
-                    disabled={
-                      loading ||
-                      processingPayment ||
-                      cartItems.length === 0 ||
-                      !stripe
-                    }
+                    disabled={loading || processingPayment || cartItems.length === 0 || !stripe}
                   >
                     {processingPayment ? (
                       <>
-                        <span
-                          className="spinner-border spinner-border-sm me-2"
-                          role="status"
-                          aria-hidden="true"
-                        ></span>
+                        <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
                         Processing Payment...
                       </>
                     ) : loading ? (
                       <>
-                        <span
-                          className="spinner-border spinner-border-sm me-2"
-                          role="status"
-                          aria-hidden="true"
-                        ></span>
+                        <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
                         Placing Order...
                       </>
                     ) : (
@@ -1009,27 +1027,17 @@ const Checkout = () => {
         const placesLibrary = await importLibrary("places");
         if (!isMounted) return;
 
-        const AutocompleteClass =
-          placesLibrary.Autocomplete ||
-          window.google?.maps?.places?.Autocomplete;
+        const AutocompleteClass = placesLibrary.Autocomplete || window.google?.maps?.places?.Autocomplete;
 
         if (!AutocompleteClass) {
           throw new Error("Autocomplete class not found");
         }
 
-        autocompleteRef.current = new AutocompleteClass(
-          addressInputRef.current,
-          {
-            types: ["address"],
-            fields: [
-              "address_components",
-              "formatted_address",
-              "geometry",
-              "name",
-            ],
-            componentRestrictions: { country: "au" },
-          },
-        );
+        autocompleteRef.current = new AutocompleteClass(addressInputRef.current, {
+          types: ["address"],
+          fields: ["address_components", "formatted_address", "geometry", "name"],
+          componentRestrictions: { country: "au" },
+        });
 
         autocompleteRef.current.addListener("place_changed", () => {
           const place = autocompleteRef.current.getPlace();
@@ -1039,9 +1047,7 @@ const Checkout = () => {
         setAddressError("");
       } catch (err) {
         console.error("[Autocomplete Debug] Google autocomplete failed:", err);
-        setAddressError(
-          "Address autocomplete is unavailable. Please enter your address manually.",
-        );
+        setAddressError("Address autocomplete is unavailable. Please enter your address manually.");
       }
     };
 
@@ -1049,11 +1055,8 @@ const Checkout = () => {
 
     return () => {
       isMounted = false;
-
       if (autocompleteRef.current && window.google?.maps?.event) {
-        window.google.maps.event.clearInstanceListeners(
-          autocompleteRef.current,
-        );
+        window.google.maps.event.clearInstanceListeners(autocompleteRef.current);
       }
     };
   }, []);
@@ -1062,7 +1065,6 @@ const Checkout = () => {
     if (!showModal) return;
 
     const scrollY = window.scrollY;
-
     document.body.style.position = "fixed";
     document.body.style.top = `-${scrollY}px`;
     document.body.style.left = "0";
@@ -1084,15 +1086,36 @@ const Checkout = () => {
   const loadCartFromStorage = () => {
     const storedCart = JSON.parse(localStorage.getItem("adadaCart")) || [];
 
-    const processedCart = storedCart.map((item) => ({
-      ...item,
-      price:
-        typeof item.price === "string" ? parseFloat(item.price) : item.price,
-      quantity:
-        typeof item.quantity === "string"
-          ? parseInt(item.quantity, 10)
-          : item.quantity,
-    }));
+    const processedCart = storedCart.map((item) => {
+      // Handle nested discount object from API response
+      let discountPercent = 0;
+      let discountName = null;
+      
+      if (item.discount && typeof item.discount === 'object' && item.discount.discount_percentage) {
+        discountPercent = parseFloat(item.discount.discount_percentage);
+        discountName = item.discount.discount_name;
+      } else if (item.discount && typeof item.discount === 'number') {
+        discountPercent = item.discount;
+        discountName = item.discount_name;
+      }
+      
+      const originalPrice = parseFloat(item.sell_price || item.price);
+      const finalPrice = discountPercent > 0 
+        ? originalPrice * (1 - discountPercent / 100)
+        : originalPrice;
+      
+      return {
+        id: item.id,
+        title: item.title || item.product_name,
+        price: originalPrice,
+        discount: discountPercent,
+        discount_name: discountName,
+        finalPrice: finalPrice,
+        image: item.image,
+        description: item.description || "",
+        quantity: parseInt(item.quantity, 10) || 1,
+      };
+    });
 
     setCartItems(processedCart);
   };
@@ -1104,7 +1127,14 @@ const Checkout = () => {
   };
 
   const subTotal = useMemo(() => {
-    return cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
+    return cartItems.reduce((sum, item) => {
+      const originalPrice = parseFloat(item.price);
+      const discountPercent = item.discount ? parseFloat(item.discount) : 0;
+      const finalPrice = discountPercent > 0 
+        ? originalPrice * (1 - discountPercent / 100)
+        : originalPrice;
+      return sum + finalPrice * item.quantity;
+    }, 0);
   }, [cartItems]);
 
   const totalItems = useMemo(() => {
@@ -1113,11 +1143,7 @@ const Checkout = () => {
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-
-    setFormData((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
+    setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
   const handleAddressManualReset = () => {
@@ -1136,26 +1162,18 @@ const Checkout = () => {
       if (!place?.address_components) return;
 
       const getComponent = (type) => {
-        const component = place.address_components.find((c) =>
-          c.types.includes(type),
-        );
+        const component = place.address_components.find((c) => c.types.includes(type));
         return component ? component.long_name : "";
       };
 
       const streetNumber = getComponent("street_number");
       const route = getComponent("route");
-      const suburb =
-        getComponent("locality") ||
-        getComponent("sublocality") ||
-        getComponent("sublocality_level_1");
+      const suburb = getComponent("locality") || getComponent("sublocality") || getComponent("sublocality_level_1");
       const state = getComponent("administrative_area_level_1");
       const postalCode = getComponent("postal_code");
       const country = getComponent("country");
 
-      const fullStreetName =
-        streetNumber && route
-          ? `${streetNumber} ${route}`
-          : route || streetNumber || "";
+      const fullStreetName = streetNumber && route ? `${streetNumber} ${route}` : route || streetNumber || "";
 
       setFormData((prev) => ({
         ...prev,
@@ -1175,27 +1193,17 @@ const Checkout = () => {
 
   const validateAddress = () => {
     try {
-      if (
-        formData.streetName &&
-        formData.suburb &&
-        formData.state &&
-        formData.postalCode
-      ) {
+      if (formData.streetName && formData.suburb && formData.state && formData.postalCode) {
         return true;
       }
 
       const manualAddress = addressInputRef.current?.value?.trim();
 
       if (manualAddress && manualAddress.length > 5) {
-        const addressParts = manualAddress
-          .split(",")
-          .map((part) => part.trim());
+        const addressParts = manualAddress.split(",").map((part) => part.trim());
 
         if (addressParts.length >= 3) {
-          const stateAndPostcode = addressParts[addressParts.length - 1]
-            ?.trim()
-            ?.split(/\s+/);
-
+          const stateAndPostcode = addressParts[addressParts.length - 1]?.trim()?.split(/\s+/);
           const derivedState = stateAndPostcode?.[0] || "";
           const derivedPostcode = stateAndPostcode?.[1] || "";
 
@@ -1222,16 +1230,14 @@ const Checkout = () => {
 
   const decreaseQty = (id) => {
     const updatedCart = cartItems.map((item) =>
-      item.id === id
-        ? { ...item, quantity: item.quantity > 1 ? item.quantity - 1 : 1 }
-        : item,
+      item.id === id ? { ...item, quantity: item.quantity > 1 ? item.quantity - 1 : 1 } : item
     );
     updateCartAndStorage(updatedCart);
   };
 
   const increaseQty = (id) => {
     const updatedCart = cartItems.map((item) =>
-      item.id === id ? { ...item, quantity: item.quantity + 1 } : item,
+      item.id === id ? { ...item, quantity: item.quantity + 1 } : item
     );
     updateCartAndStorage(updatedCart);
   };
@@ -1247,7 +1253,6 @@ const Checkout = () => {
     setCartItems([]);
     window.dispatchEvent(new Event("cartUpdated"));
 
-    // Reset all form fields
     setFormData({
       firstName: "",
       lastName: "",
@@ -1262,12 +1267,10 @@ const Checkout = () => {
       paymentMethod: "stripe",
     });
 
-    // Clear address input field
     if (addressInputRef.current) {
       addressInputRef.current.value = "";
     }
 
-    // Reset Stripe CardElement and reCAPTCHA
     if (paymentFormResetRef.current) {
       paymentFormResetRef.current.resetForm();
     }
@@ -1304,7 +1307,6 @@ const Checkout = () => {
           alt="Cup Outline"
           className="checkout-decor checkout-decor-left img-fluid"
         />
-
         <img
           src={cupOutlineRight}
           alt="Cinnamon Decor"
@@ -1327,30 +1329,16 @@ const Checkout = () => {
           </motion.div>
 
           {error && (
-            <div
-              className="alert alert-danger alert-dismissible fade show mb-4"
-              role="alert"
-            >
+            <div className="alert alert-danger alert-dismissible fade show mb-4" role="alert">
               <strong>Error:</strong> {error}
-              <button
-                type="button"
-                className="btn-close"
-                onClick={() => setError(null)}
-              ></button>
+              <button type="button" className="btn-close" onClick={() => setError(null)}></button>
             </div>
           )}
 
           {success && (
-            <div
-              className="alert alert-success alert-dismissible fade show mb-4"
-              role="alert"
-            >
+            <div className="alert alert-success alert-dismissible fade show mb-4" role="alert">
               <strong>Success:</strong> {success}
-              <button
-                type="button"
-                className="btn-close"
-                onClick={() => setSuccess(null)}
-              ></button>
+              <button type="button" className="btn-close" onClick={() => setSuccess(null)}></button>
             </div>
           )}
 

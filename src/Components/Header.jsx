@@ -23,14 +23,22 @@ const Header = () => {
   const [isScrolled, setIsScrolled] = useState(false);
   const [cartItems, setCartItems] = useState([]);
 
-  // Fixed: Count unique products instead of total quantity
-  const cartCount = useMemo(
-    () => cartItems.length,
+  // Calculate subtotal with discounted prices
+  const subTotal = useMemo(
+    () => cartItems.reduce((sum, item) => {
+      const originalPrice = parseFloat(item.price);
+      const discountPercent = item.discount ? parseFloat(item.discount) : 0;
+      const finalPrice = discountPercent > 0 
+        ? originalPrice * (1 - discountPercent / 100)
+        : originalPrice;
+      return sum + finalPrice * item.quantity;
+    }, 0),
     [cartItems],
   );
 
-  const subTotal = useMemo(
-    () => cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0),
+  // Count unique products
+  const cartCount = useMemo(
+    () => cartItems.length,
     [cartItems],
   );
 
@@ -55,15 +63,13 @@ const Header = () => {
 
   const loadCartFromStorage = () => {
     const storedCart = JSON.parse(localStorage.getItem("adadaCart")) || [];
-    // Convert price from string to number for each item
+    // Process cart items to ensure all fields exist
     const processedCart = storedCart.map((item) => ({
       ...item,
-      price:
-        typeof item.price === "string" ? parseFloat(item.price) : item.price,
-      quantity:
-        typeof item.quantity === "string"
-          ? parseInt(item.quantity)
-          : item.quantity,
+      price: typeof item.price === "string" ? parseFloat(item.price) : item.price,
+      discount: item.discount || 0, // Default to 0 if no discount
+      finalPrice: item.finalPrice || (typeof item.price === "string" ? parseFloat(item.price) : item.price),
+      quantity: typeof item.quantity === "string" ? parseInt(item.quantity) : item.quantity,
     }));
     setCartItems(processedCart);
   };
@@ -130,7 +136,6 @@ const Header = () => {
         ? { ...item, quantity: item.quantity > 1 ? item.quantity - 1 : 1 }
         : item,
     );
-
     updateCartAndStorage(updatedCart);
   };
 
@@ -138,13 +143,22 @@ const Header = () => {
     const updatedCart = cartItems.map((item) =>
       item.id === id ? { ...item, quantity: item.quantity + 1 } : item,
     );
-
     updateCartAndStorage(updatedCart);
   };
 
   const removeCartItem = (id) => {
     const updatedCart = cartItems.filter((item) => item.id !== id);
     updateCartAndStorage(updatedCart);
+  };
+
+  // Helper function to calculate display price
+  const getDisplayPrice = (item) => {
+    const originalPrice = parseFloat(item.price);
+    const discountPercent = item.discount ? parseFloat(item.discount) : 0;
+    if (discountPercent > 0) {
+      return originalPrice * (1 - discountPercent / 100);
+    }
+    return originalPrice;
   };
 
   return (
@@ -398,62 +412,76 @@ const Header = () => {
           {cartItems.length === 0 ? (
             <div className="adada-cart-empty">Your cart is empty.</div>
           ) : (
-            cartItems.map((item) => (
-              <div className="adada-cart-item" key={item.id}>
-                <div className="adada-cart-item-image">
-                  <img
-                    src={item.image}
-                    alt={item.title}
-                    className="img-fluid"
-                  />
-                </div>
-
-                <div className="adada-cart-item-content">
-                  <h6 className="adada-cart-item-title">{item.title}</h6>
-                  <div
-                    className="adada-cart-item-desc"
-                    dangerouslySetInnerHTML={{
-                      __html: (() => {
-                        // Strip HTML tags to get plain text
-                        const temp = document.createElement("div");
-                        temp.innerHTML = item.description || "";
-                        const plainText =
-                          temp.textContent || temp.innerText || "";
-
-                        // Truncate to 45 characters
-                        if (plainText.length > 40) {
-                          return plainText.substring(0, 40) + "...";
-                        }
-                        return plainText;
-                      })(),
-                    }}
-                  />{" "}
-                  <div className="adada-cart-item-price">
-                    ${Number(item.price).toFixed(2)}
-                  </div>
-                </div>
-
-                <div className="adada-cart-item-actions">
-                  <div className="adada-qty-box">
-                    <button type="button" onClick={() => decreaseQty(item.id)}>
-                      <FaMinus />
-                    </button>
-                    <span>{item.quantity}</span>
-                    <button type="button" onClick={() => increaseQty(item.id)}>
-                      <FaPlus />
-                    </button>
+            cartItems.map((item) => {
+              const hasDiscount = item.discount && parseFloat(item.discount) > 0;
+              const originalPrice = parseFloat(item.price);
+              const discountPercent = hasDiscount ? parseFloat(item.discount) : 0;
+              const displayPrice = getDisplayPrice(item);
+              
+              return (
+                <div className="adada-cart-item" key={item.id}>
+                  <div className="adada-cart-item-image">
+                    <img
+                      src={item.image}
+                      alt={item.title}
+                      className="img-fluid"
+                    />
                   </div>
 
-                  <button
-                    type="button"
-                    className="adada-cart-delete"
-                    onClick={() => removeCartItem(item.id)}
-                  >
-                    <FaTrash />
-                  </button>
+                  <div className="adada-cart-item-content">
+                    <h6 className="adada-cart-item-title">{item.title}</h6>
+                    <div
+                      className="adada-cart-item-desc"
+                      dangerouslySetInnerHTML={{
+                        __html: (() => {
+                          const temp = document.createElement("div");
+                          temp.innerHTML = item.description || "";
+                          const plainText = temp.textContent || temp.innerText || "";
+                          if (plainText.length > 40) {
+                            return plainText.substring(0, 40) + "...";
+                          }
+                          return plainText;
+                        })(),
+                      }}
+                    />
+                    <div className="adada-cart-item-price">
+                      {hasDiscount ? (
+                        <>
+                          <span className="original-price">
+                            ${originalPrice.toFixed(2)}
+                          </span>
+                          <span className="discounted-price">
+                            ${displayPrice.toFixed(2)}
+                          </span>
+                        </>
+                      ) : (
+                        <span>${displayPrice.toFixed(2)}</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="adada-cart-item-actions">
+                    <div className="adada-qty-box">
+                      <button type="button" onClick={() => decreaseQty(item.id)}>
+                        <FaMinus />
+                      </button>
+                      <span>{item.quantity}</span>
+                      <button type="button" onClick={() => increaseQty(item.id)}>
+                        <FaPlus />
+                      </button>
+                    </div>
+
+                    <button
+                      type="button"
+                      className="adada-cart-delete"
+                      onClick={() => removeCartItem(item.id)}
+                    >
+                      <FaTrash />
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
 
