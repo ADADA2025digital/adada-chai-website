@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import ReCAPTCHA from "react-google-recaptcha";
+import api from "../Config/axiosConfig";
 
 const RentEnquiryForm = ({ productTitle, productId, productsList = [] }) => {
   const recaptchaRef = useRef(null);
@@ -132,9 +133,17 @@ const RentEnquiryForm = ({ productTitle, productId, productsList = [] }) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    if (!validate()) return;
+    // console.log("=== FORM SUBMISSION STARTED ===");
+    // console.log("Form Data:", formData);
+    // console.log("Captcha Token Present:", !!captchaToken);
+
+    if (!validate()) {
+      // console.log("Validation failed");
+      return;
+    }
 
     if (!captchaToken) {
+      // console.log("Captcha token missing");
       setCaptchaError("Please verify the reCAPTCHA");
       setShowRecaptcha(true);
       return;
@@ -153,27 +162,21 @@ const RentEnquiryForm = ({ productTitle, productId, productsList = [] }) => {
         recaptchaToken: captchaToken,
       };
 
-      const apiUrl = "http://localhost:8000";
+      // console.log("Sending payload to backend:", payload);
+      
+      // Using axios instead of fetch
+      const response = await api.post("/rent/request", payload);
+      
+      // console.log("Response data from backend:", response.data);
 
-      const response = await fetch(`${apiUrl}/api/rent/request`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-        body: JSON.stringify(payload),
-      });
-
-      const data = await response.json();
-
-      if (response.ok && data.status === "success") {
+      if (response.data.status === "success") {
+        // console.log("Form submission successful according to API");
         setSubmitStatus({
           type: "success",
-          message:
-            data.message ||
-            "Rent request submitted successfully! We'll contact you shortly.",
+          message: response.data.message || "Rent request submitted successfully! We'll contact you shortly.",
         });
 
+        // Reset form
         setFormData({
           firstName: "",
           lastName: "",
@@ -197,27 +200,61 @@ const RentEnquiryForm = ({ productTitle, productId, productsList = [] }) => {
           setSubmitStatus({ type: null, message: null });
         }, 5000);
       } else {
-        if (data.errors) {
+        // console.log("API returned error status:", response.data);
+        if (response.data.errors) {
+          // console.log("Validation errors from backend:", response.data.errors);
           const apiErrors = {};
-          Object.keys(data.errors).forEach((key) => {
-            apiErrors[key] = data.errors[key][0];
+          Object.keys(response.data.errors).forEach((key) => {
+            apiErrors[key] = response.data.errors[key][0];
           });
-
           setErrors(apiErrors);
           setSubmitStatus({
             type: "error",
             message: "Please check the form for errors.",
           });
         } else {
-          throw new Error(data.message || "Failed to submit rent request");
+          throw new Error(response.data.message || "Failed to submit rent request");
         }
       }
     } catch (error) {
-      console.error("Rent request error:", error);
+      // console.error("Network or other error:", error);
+      // console.error("Error details:", {
+      //   message: error.message,
+      //   response: error.response?.data,
+      //   status: error.response?.status,
+      //   stack: error.stack,
+      //   name: error.name
+      // });
+      
+      // Handle different error scenarios
+      let errorMessage = "Failed to submit rent request. Please try again later.";
+      
+      if (error.response) {
+        // The request was made and the server responded with a status code
+        // that falls out of the range of 2xx
+        if (error.response.data?.message) {
+          errorMessage = error.response.data.message;
+        } else if (error.response.data?.errors) {
+          const apiErrors = {};
+          Object.keys(error.response.data.errors).forEach((key) => {
+            apiErrors[key] = error.response.data.errors[key][0];
+          });
+          setErrors(apiErrors);
+          errorMessage = "Please check the form for errors.";
+        } else {
+          errorMessage = `Server error: ${error.response.status} - ${error.response.statusText}`;
+        }
+      } else if (error.request) {
+        // The request was made but no response was received
+        errorMessage = "No response from server. Please check your internet connection.";
+      } else {
+        // Something happened in setting up the request that triggered an Error
+        errorMessage = error.message || errorMessage;
+      }
+      
       setSubmitStatus({
         type: "error",
-        message:
-          error.message || "Failed to submit rent request. Please try again later.",
+        message: errorMessage,
       });
 
       setTimeout(() => {
@@ -225,6 +262,7 @@ const RentEnquiryForm = ({ productTitle, productId, productsList = [] }) => {
       }, 5000);
     } finally {
       setIsSubmitting(false);
+      // console.log("=== FORM SUBMISSION COMPLETED ===");
     }
   };
 

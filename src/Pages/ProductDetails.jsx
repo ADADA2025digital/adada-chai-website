@@ -14,6 +14,10 @@ import {
   FaChevronRight,
 } from "react-icons/fa";
 
+import { Swiper, SwiperSlide } from "swiper/react";
+import { Autoplay } from "swiper/modules";
+import "swiper/css";
+
 const slugify = (text) => {
   return String(text || "")
     .toLowerCase()
@@ -28,47 +32,44 @@ const createProductSlug = (product) => {
   return `${slugify(product.title)}`;
 };
 
-// Helper function to sanitize and preserve HTML formatting
 const sanitizeAndPreserveHtml = (html) => {
   if (!html) return "";
-  
-  // Only remove dangerous tags, preserve formatting
+
   return html
-    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-    .replace(/on\w+="[^"]*"/g, '')
-    .replace(/on\w+='[^']*'/g, '')
-    .replace(/javascript:/gi, '');
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
+    .replace(/on\w+="[^"]*"/g, "")
+    .replace(/on\w+='[^']*'/g, "")
+    .replace(/javascript:/gi, "");
 };
 
-// Helper function to strip HTML tags and clean text (for meta descriptions)
 const stripHtmlTags = (html) => {
   if (!html) return "";
-  
-  const tempDiv = document.createElement('div');
+
+  const tempDiv = document.createElement("div");
   tempDiv.innerHTML = html;
-  let text = tempDiv.textContent || tempDiv.innerText || '';
-  text = text.replace(/\s+/g, ' ').trim();
-  text = text.replace(/&nbsp;/g, ' ').trim();
-  
+  let text = tempDiv.textContent || tempDiv.innerText || "";
+  text = text.replace(/\s+/g, " ").trim();
+  text = text.replace(/&nbsp;/g, " ").trim();
+
   return text;
 };
 
-// Helper function to safely truncate text if needed
 const truncateText = (text, maxLength) => {
   if (!text || text.length <= maxLength) return text;
-  return text.substring(0, maxLength) + '...';
+  return text.substring(0, maxLength) + "...";
 };
 
 const ProductDetails = () => {
   const { slug } = useParams();
   const navigate = useNavigate();
+
   const [quantity, setQuantity] = useState(1);
   const [recommendIndex, setRecommendIndex] = useState(0);
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [imageSwiper, setImageSwiper] = useState(null);
 
-  // Fetch all products
   useEffect(() => {
     fetchProducts();
   }, []);
@@ -78,7 +79,6 @@ const ProductDetails = () => {
       setLoading(true);
       const data = await productAPI.getAllProducts();
 
-      // Extract products array
       let productsArray = [];
 
       if (Array.isArray(data)) {
@@ -96,39 +96,36 @@ const ProductDetails = () => {
         }
       }
 
-      // Transform products to match the expected format
       const transformedProducts = productsArray.map((product) => {
-        // Extract image URL from assets
-        let imageUrl = null;
+        let imageUrls = [];
 
         if (
           product.assets &&
           Array.isArray(product.assets) &&
           product.assets.length > 0
         ) {
-          const imageAsset = product.assets.find(
-            (asset) => asset.asset_url && asset.asset_type === "image",
-          );
+          imageUrls = product.assets
+            .filter((asset) => asset.asset_url && asset.asset_type === "image")
+            .map((asset) => asset.asset_url);
 
-          if (imageAsset && imageAsset.asset_url) {
-            imageUrl = imageAsset.asset_url;
-          } else if (product.assets[0] && product.assets[0].asset_url) {
-            imageUrl = product.assets[0].asset_url;
+          if (imageUrls.length === 0) {
+            imageUrls = product.assets
+              .filter((asset) => asset.asset_url)
+              .map((asset) => asset.asset_url);
           }
         }
 
-        // Fallback to placeholder
-        if (!imageUrl) {
+        if (imageUrls.length === 0) {
           const colors = ["FF6B6B", "4ECDC4", "45B7D1", "96CEB4", "FFEAA7"];
           const hash = (product.product_name || "")
             .split("")
             .reduce((acc, char) => acc + char.charCodeAt(0), 0);
           const color = colors[hash % colors.length];
           const text = encodeURIComponent(product.product_name || "Product");
-          imageUrl = `https://via.placeholder.com/300x300/${color}/FFFFFF?text=${text}`;
+          const fallbackImage = `https://via.placeholder.com/300x300/${color}/FFFFFF?text=${text}`;
+          imageUrls = [fallbackImage];
         }
 
-        // Calculate discounted price if discount exists
         let finalPrice = parseFloat(product.sell_price) || 0;
         if (product.discount && product.discount.discount_percentage) {
           const discountPercent = parseFloat(
@@ -137,7 +134,6 @@ const ProductDetails = () => {
           finalPrice = finalPrice * (1 - discountPercent / 100);
         }
 
-        // Safely extract category info (handle if category is an object or string)
         let categoryName = "General";
         let categoryDescription = "";
 
@@ -150,11 +146,10 @@ const ProductDetails = () => {
           }
         }
 
-        // Preserve HTML formatting for description and specification
         const cleanDescription = sanitizeAndPreserveHtml(product.description);
-        const cleanSpecification = sanitizeAndPreserveHtml(product.specification);
-        
-        // Strip HTML for category description (used in meta text)
+        const cleanSpecification = sanitizeAndPreserveHtml(
+          product.specification,
+        );
         const plainCategoryDescription = stripHtmlTags(product.description);
 
         return {
@@ -163,10 +158,13 @@ const ProductDetails = () => {
           description: cleanDescription || "No description available",
           price: finalPrice,
           original_price: parseFloat(product.sell_price) || 0,
-          image: imageUrl,
+          image: imageUrls[0],
+          images: imageUrls,
           availability: product.quantity > 0 ? "In Stock" : "Out of Stock",
           category: categoryName,
-          categoryDescription: plainCategoryDescription ? truncateText(plainCategoryDescription, 100) : categoryDescription,
+          categoryDescription: plainCategoryDescription
+            ? truncateText(plainCategoryDescription, 100)
+            : categoryDescription,
           specification: cleanSpecification || "No specifications available",
           quantity: product.quantity || 0,
           sku: product.sku,
@@ -188,7 +186,6 @@ const ProductDetails = () => {
     }
   };
 
-  // Find the current product based on slug
   const product = useMemo(() => {
     if (!products.length) return null;
 
@@ -198,7 +195,6 @@ const ProductDetails = () => {
     });
   }, [products, slug]);
 
-  // Get recommendations (all other products)
   const recommendations = useMemo(() => {
     if (!product) return [];
     return products.filter((item) => item.id !== product.id);
@@ -258,7 +254,18 @@ const ProductDetails = () => {
     }
   };
 
-  // Render stars based on rating
+  const handlePrevImage = () => {
+    if (imageSwiper) {
+      imageSwiper.slidePrev();
+    }
+  };
+
+  const handleNextImage = () => {
+    if (imageSwiper) {
+      imageSwiper.slideNext();
+    }
+  };
+
   const renderStars = () => {
     const rating = product?.rating || 4.5;
     const fullStars = Math.floor(rating);
@@ -277,7 +284,6 @@ const ProductDetails = () => {
     );
   };
 
-  // Show loading state
   if (loading) {
     return (
       <div className="container-fluid p-0">
@@ -298,7 +304,6 @@ const ProductDetails = () => {
     );
   }
 
-  // Show error state
   if (error) {
     return (
       <div className="container-fluid p-0">
@@ -319,7 +324,6 @@ const ProductDetails = () => {
     );
   }
 
-  // Show not found state
   if (!product) {
     return (
       <div className="container-fluid p-0">
@@ -378,15 +382,55 @@ const ProductDetails = () => {
                 viewport={{ once: true, amount: 0.2 }}
                 transition={{ duration: 0.85, ease: "easeOut" }}
               >
-                <img
-                  src={product.image}
-                  alt={product.title}
-                  className="img-fluid product-main-image"
-                  onError={(e) => {
-                    e.target.src =
-                      "https://via.placeholder.com/300x300?text=No+Image";
-                  }}
-                />
+                <div style={{ width: "100%", maxWidth: "420px" }}>
+                  <Swiper
+                    modules={[Autoplay]}
+                    slidesPerView={1}
+                    spaceBetween={10}
+                    loop={product.images?.length > 1}
+                    onSwiper={setImageSwiper}
+                    className="product-image-swiper"
+                  >
+                    {(product.images || [product.image]).map((img, index) => (
+                      <SwiperSlide key={index}>
+                        <img
+                          src={img}
+                          alt={`${product.title} ${index + 1}`}
+                          className="img-fluid product-main-image"
+                          style={{
+                            width: "100%",
+                            height: "420px",
+                            objectFit: "cover",
+                            borderRadius: "16px",
+                          }}
+                          onError={(e) => {
+                            e.target.src =
+                              "https://via.placeholder.com/300x300?text=No+Image";
+                          }}
+                        />
+                      </SwiperSlide>
+                    ))}
+                  </Swiper>
+
+                  {product.images?.length > 1 && (
+                    <div className="d-flex justify-content-center gap-2 mt-3">
+                      <button
+                        type="button"
+                        onClick={handlePrevImage}
+                        className="btn btn-sm recommendation-nav-btn"
+                      >
+                        <FaChevronLeft />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleNextImage}
+                        className="btn btn-sm recommendation-nav-btn"
+                      >
+                        <FaChevronRight />
+                      </button>
+                    </div>
+                  )}
+                </div>
               </motion.div>
             </div>
 
@@ -424,8 +468,7 @@ const ProductDetails = () => {
                   )}
                 </div>
 
-                {/* Product description with HTML formatting preserved */}
-                <div 
+                <div
                   className="mb-3 product-description"
                   dangerouslySetInnerHTML={{ __html: product.description }}
                 />
@@ -437,26 +480,28 @@ const ProductDetails = () => {
                   <p className="mb-1 product-info-text">
                     <strong>Category :</strong> {product.category}
                   </p>
+
                   {product.categoryDescription && (
                     <p className="mb-1 product-info-text">
                       <strong>Category Description :</strong>{" "}
                       {product.categoryDescription}
                     </p>
                   )}
-                  
-                  {/* Specification with HTML formatting preserved */}
+
                   {product.specification && (
                     <>
                       <p className="mb-1 product-info-text">
                         <strong>Specification :</strong>
                       </p>
-                      <div 
+                      <div
                         className="mb-1 product-info-text product-specification"
-                        dangerouslySetInnerHTML={{ __html: product.specification }}
+                        dangerouslySetInnerHTML={{
+                          __html: product.specification,
+                        }}
                       />
                     </>
                   )}
-                  
+
                   {product.discount && product.discount.discount_percentage && (
                     <p className="mb-1 product-info-text">
                       <strong>Discount :</strong>{" "}
@@ -572,12 +617,9 @@ const ProductDetails = () => {
                         <h6 className="fw-bold mb-1 recommend-item-title">
                           {item.title}
                         </h6>
-                        <div 
-                          className="mb-1 recommend-item-desc"
-                          dangerouslySetInnerHTML={{ 
-                            __html: stripHtmlTags(item.description).substring(0, 60) + "..."
-                          }}
-                        />
+                        <p className="mb-1 recommend-item-desc">
+                          {truncateText(stripHtmlTags(item.description), 60)}
+                        </p>
                         <span className="fw-bold recommend-item-price">
                           ${Number(item.price).toFixed(2)}
                         </span>
