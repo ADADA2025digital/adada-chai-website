@@ -575,7 +575,7 @@ const ProductDetails = () => {
                     </>
                   )}
 
-                                    {product.discount && product.discount.discount_percentage && (
+                  {product.discount && product.discount.discount_percentage && (
                     <p className="mb-1 product-info-text mt-2">
                       <strong>Discount :</strong>{" "}
                       {product.discount.discount_percentage}% off
@@ -591,28 +591,27 @@ const ProductDetails = () => {
                       <div className="dimensions-grid" style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "8px" }}>
                         {product.height && (
                           <p className="mb-1 product-info-text" style={{ fontSize: "13px" }}>
-                            <strong>Height :</strong> {product.height} {product.height && !isNaN(product.height) && parseFloat(product.height) < 100 ? "cm" : ""}
+                            <strong>Height :</strong> {product.height} cm
                           </p>
                         )}
                         {product.width && (
                           <p className="mb-1 product-info-text" style={{ fontSize: "13px" }}>
-                            <strong>Width :</strong> {product.width} {product.width && !isNaN(product.width) && parseFloat(product.width) < 100 ? "cm" : ""}
+                            <strong>Width :</strong> {product.width} cm
                           </p>
                         )}
                         {product.length && (
                           <p className="mb-1 product-info-text" style={{ fontSize: "13px" }}>
-                            <strong>Length :</strong> {product.length} {product.length && !isNaN(product.length) && parseFloat(product.length) < 100 ? "cm" : ""}
+                            <strong>Length :</strong> {product.length} cm
                           </p>
                         )}
                         {product.weight && (
                           <p className="mb-1 product-info-text" style={{ fontSize: "13px" }}>
-                            <strong>Weight :</strong> {product.weight} {product.weight && !isNaN(product.weight) && parseFloat(product.weight) < 1 ? "kg" : "g"}
+                            <strong>Weight :</strong> {product.weight} kg
                           </p>
                         )}
                       </div>
                     </div>
                   )}
-
                 </div>
 
                 <div className="d-flex flex-column flex-md-row align-items-stretch align-items-md-center gap-2 gap-md-3 w-100">
