@@ -37,83 +37,142 @@ const stripePromise = loadStripe(
   "pk_test_51T6ky36nDiic8XlH4wGGMNX2VgNqrXqMBCBx5G0YNwWmCs5MVUkLCCpGitUZcWm35JQ8YcSa2PYzr1lEezzZxuPC00KDmlUv6J",
 );
 
-// Delivery options mapping based on weight ranges
-const DELIVERY_OPTIONS = {
-  standard: [
-    { minWeight: 0, maxWeight: 250, title: "Standard Shipping (0-250g)", price: 9.70, description: "3-5 business days delivery" },
-    { minWeight: 250, maxWeight: 500, title: "Standard Shipping (250g-500g)", price: 11.15, description: "5-8 working days delivery" },
-    { minWeight: 500, maxWeight: 1000, title: "Standard Shipping (500g-1kg)", price: 15.25, description: "5-8 working days delivery" },
-    { minWeight: 1000, maxWeight: 3000, title: "Standard Shipping (1kg-3kg)", price: 19.30, description: "5-8 working days delivery" },
-  ],
-  express: [
-    { minWeight: 0, maxWeight: 500, title: "Express Shipping (0-500g)", price: 14.65, description: "1-2 working days delivery" },
-    { minWeight: 500, maxWeight: 1000, title: "Express Shipping (500g-1kg)", price: 19.25, description: "1-2 working days delivery" },
-  ]
+const normalizeDeliveryType = (title = "") => {
+  const lower = title.toLowerCase();
+  if (lower.includes("express")) return "express";
+  return "standard";
 };
 
-// Helper function to calculate delivery charge based on weight
-const calculateDeliveryCharge = (totalWeight, deliveryType = "standard") => {
-  if (totalWeight <= 0) return 0;
-  
-  const options = DELIVERY_OPTIONS[deliveryType] || DELIVERY_OPTIONS.standard;
-  const applicableOption = options.find(option => 
-    totalWeight >= option.minWeight && totalWeight < option.maxWeight
-  );
-  
-  // For weights above the max range, use the highest tier
-  if (!applicableOption && options.length > 0) {
-    const maxOption = options.reduce((prev, current) => 
-      (prev.maxWeight > current.maxWeight) ? prev : current
-    );
-    return maxOption.price;
+const parseWeightValueToKg = (value = "") => {
+  const clean = value.toLowerCase().trim();
+
+  if (clean.endsWith("kg")) {
+    const num = parseFloat(clean.replace("kg", "").trim());
+    return Number.isNaN(num) ? null : num;
   }
-  
-  return applicableOption ? applicableOption.price : 0;
+
+  if (clean.endsWith("g")) {
+    const num = parseFloat(clean.replace("g", "").trim());
+    return Number.isNaN(num) ? null : num / 1000;
+  }
+
+  const fallback = parseFloat(clean);
+  return Number.isNaN(fallback) ? null : fallback;
 };
 
-// Function to fetch delivery options from API
+const parseWeightRangeFromTitle = (title = "") => {
+  const match = title.match(/\((.*?)\)/);
+  if (!match) return null;
+
+  const rangeText = match[1].trim();
+  const parts = rangeText.split("-").map((p) => p.trim());
+
+  if (parts.length !== 2) return null;
+
+  const minWeight = parseWeightValueToKg(parts[0]);
+  const maxWeight = parseWeightValueToKg(parts[1]);
+
+  if (minWeight === null || maxWeight === null) return null;
+
+  return { minWeight, maxWeight };
+};
+
 const fetchDeliveryOptions = async () => {
   try {
-    const response = await fetch('https://urbanviewre.com/chai-backend/api/delivery-options', {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-      }
-    });
-    
+    const response = await fetch(
+      "https://urbanviewre.com/chai-backend/api/delivery-options",
+      {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+      },
+    );
+
     if (!response.ok) {
-      throw new Error('Failed to fetch delivery options');
+      throw new Error("Failed to fetch delivery options");
     }
-    
+
     const result = await response.json();
-    if (result.status === 'success' && result.data) {
-      // Parse and organize delivery options from API
-      const standardOptions = [];
-      const expressOptions = [];
-      
-      result.data.forEach(option => {
+
+    if (result.status === "success" && Array.isArray(result.data)) {
+      const grouped = {};
+
+      result.data.forEach((option) => {
+        const title = option.delivery_title || "";
+        const range = parseWeightRangeFromTitle(title);
+        const deliveryType = normalizeDeliveryType(title);
+
+        if (!range) return;
+
         const optionData = {
           option_id: option.option_id,
-          title: option.delivery_title,
-          price: parseFloat(option.delivery_price),
-          description: option.deleivery_description
+          title,
+          price: parseFloat(option.delivery_price || 0),
+          description: option.deleivery_description || "",
+          minWeight: range.minWeight,
+          maxWeight: range.maxWeight,
+          deliveryType,
+          created_at: option.created_at,
+          updated_at: option.updated_at,
         };
-        
-        if (option.delivery_title.toLowerCase().includes('express')) {
-          expressOptions.push(optionData);
-        } else {
-          standardOptions.push(optionData);
+
+        if (!grouped[deliveryType]) {
+          grouped[deliveryType] = [];
         }
+
+        grouped[deliveryType].push(optionData);
       });
-      
-      return { standard: standardOptions, express: expressOptions };
+
+      Object.keys(grouped).forEach((type) => {
+        grouped[type] = grouped[type].sort(
+          (a, b) => a.minWeight - b.minWeight,
+        );
+      });
+
+      return grouped;
     }
-    return null;
+
+    return {};
   } catch (error) {
-    console.error('Error fetching delivery options:', error);
-    return null;
+    console.error("Error fetching delivery options:", error);
+    return {};
   }
+};
+
+const calculateDeliveryCharge = (
+  totalWeightKg,
+  selectedDeliveryType,
+  deliveryOptions,
+) => {
+  if (!totalWeightKg || totalWeightKg <= 0) return 0;
+  if (!deliveryOptions || typeof deliveryOptions !== "object") return 0;
+
+  const options = deliveryOptions[selectedDeliveryType] || [];
+  if (!options.length) return 0;
+
+  const applicableOption = options.find((option) => {
+    const isLastTier = option === options[options.length - 1];
+
+    if (isLastTier) {
+      return totalWeightKg >= option.minWeight && totalWeightKg <= option.maxWeight;
+    }
+
+    return totalWeightKg >= option.minWeight && totalWeightKg < option.maxWeight;
+  });
+
+  if (applicableOption) {
+    return Number(applicableOption.price) || 0;
+  }
+
+  const lastTier = options[options.length - 1];
+
+  if (lastTier && totalWeightKg > lastTier.maxWeight) {
+    return Number(lastTier.price) || 0;
+  }
+
+  return 0;
 };
 
 const SuccessModal = ({ isOpen, onClose, orderResult }) => {
@@ -127,7 +186,6 @@ const SuccessModal = ({ isOpen, onClose, orderResult }) => {
   const transaction = orderData?.transaction;
   const items = orderData?.items || [];
 
-  // Calculate totals from order data
   const totalAmount = items
     .reduce((sum, item) => {
       return sum + item.quantity * parseFloat(item.order_price);
@@ -399,16 +457,12 @@ const SuccessModal = ({ isOpen, onClose, orderResult }) => {
                               {item.product?.product_name || "Product"}
                             </span>
                             <span className="item-details">
-                              {item.quantity} × $
-                              {parseFloat(item.order_price).toFixed(2)}
+                              {item.quantity} × ${parseFloat(item.order_price).toFixed(2)}
                             </span>
                           </div>
 
                           <div className="item-total">
-                            $
-                            {(
-                              item.quantity * parseFloat(item.order_price)
-                            ).toFixed(2)}
+                            ${(item.quantity * parseFloat(item.order_price)).toFixed(2)}
                           </div>
                         </div>
                       ))}
@@ -523,7 +577,6 @@ const PaymentForm = forwardRef(
     const [captchaToken, setCaptchaToken] = useState("");
     const [captchaError, setCaptchaError] = useState("");
 
-    // Expose reset method to parent component
     useImperativeHandle(ref, () => ({
       resetForm: () => {
         if (elements) {
@@ -573,19 +626,26 @@ const PaymentForm = forwardRef(
         }
 
         const calculatedTotal = cartItems.reduce((sum, item) => {
-          const originalPrice = parseFloat(item.price);
-          const discountPercent = item.discount ? parseFloat(item.discount) : 0;
-          const finalPrice = discountPercent > 0 
-            ? originalPrice * (1 - discountPercent / 100)
-            : originalPrice;
-          return sum + finalPrice * parseInt(item.quantity, 10);
+          const originalPrice = Number(item.price) || 0;
+          const discountPercent = Number(item.discount) || 0;
+          const finalPrice =
+            discountPercent > 0
+              ? originalPrice * (1 - discountPercent / 100)
+              : originalPrice;
+
+          return sum + finalPrice * (Number(item.quantity) || 1);
         }, 0);
 
         if (calculatedTotal <= 0) {
           throw new Error("Invalid total amount. Please check your cart items.");
         }
 
-        if (!formData.firstName || !formData.lastName || !formData.email || !formData.phone) {
+        if (
+          !formData.firstName ||
+          !formData.lastName ||
+          !formData.email ||
+          !formData.phone
+        ) {
           throw new Error("Please fill in all required fields");
         }
 
@@ -594,7 +654,9 @@ const PaymentForm = forwardRef(
         }
 
         if (!captchaToken) {
-          setCaptchaError("Please verify the reCAPTCHA before placing your order.");
+          setCaptchaError(
+            "Please verify the reCAPTCHA before placing your order.",
+          );
           setShowRecaptcha(true);
           throw new Error("Please complete the reCAPTCHA verification.");
         }
@@ -612,7 +674,9 @@ const PaymentForm = forwardRef(
         );
 
         if (invalidItems.length > 0) {
-          throw new Error("Some items in your cart are invalid. Please remove them and try again.");
+          throw new Error(
+            "Some items in your cart are invalid. Please remove them and try again.",
+          );
         }
 
         const fullAddress = addressInputRef.current?.value?.trim() || "";
@@ -633,20 +697,21 @@ const PaymentForm = forwardRef(
           delivery_type: selectedDeliveryType,
           total_weight: totalWeight,
           products: cartItems.map((item) => {
-            const originalPrice = parseFloat(item.price);
-            const discountPercent = item.discount ? parseFloat(item.discount) : 0;
-            const finalPrice = discountPercent > 0 
-              ? originalPrice * (1 - discountPercent / 100)
-              : originalPrice;
-            
+            const originalPrice = Number(item.price) || 0;
+            const discountPercent = Number(item.discount) || 0;
+            const finalPrice =
+              discountPercent > 0
+                ? originalPrice * (1 - discountPercent / 100)
+                : originalPrice;
+
             return {
               product_id: parseInt(item.id, 10),
-              quantity: parseInt(item.quantity, 10),
+              quantity: parseInt(item.quantity, 10) || 1,
               price: finalPrice,
               original_price: originalPrice,
               discount_percent: discountPercent,
               discount_name: item.discount_name || null,
-              weight: item.weight || 0, // Add weight to product data
+              weight: item.weight || 0,
             };
           }),
           card_number: token.id,
@@ -676,8 +741,10 @@ const PaymentForm = forwardRef(
       } catch (err) {
         if (err.response) {
           if (err.response.status === 422) {
-            const validationErrors = err.response.data.errors || err.response.data;
+            const validationErrors =
+              err.response.data.errors || err.response.data;
             let errorMessage = "Validation failed: ";
+
             if (typeof validationErrors === "object") {
               const errorList = [];
               Object.values(validationErrors).forEach((errors) => {
@@ -691,6 +758,7 @@ const PaymentForm = forwardRef(
             } else {
               errorMessage = "Please check all required fields.";
             }
+
             onError(errorMessage);
           } else if (err.response.data?.message) {
             onError(err.response.data.message);
@@ -702,7 +770,9 @@ const PaymentForm = forwardRef(
         } else if (err.message) {
           onError(err.message);
         } else {
-          onError("Failed to place order. Please check your details and try again.");
+          onError(
+            "Failed to place order. Please check your details and try again.",
+          );
         }
       } finally {
         setProcessingPayment(false);
@@ -714,27 +784,32 @@ const PaymentForm = forwardRef(
       e.preventDefault();
       if (!captchaToken) {
         setShowRecaptcha(true);
-        setCaptchaError("Please verify the reCAPTCHA before placing your order.");
+        setCaptchaError(
+          "Please verify the reCAPTCHA before placing your order.",
+        );
         return;
       }
       await processOrder();
     };
 
-    // Calculate discount summary
     const discountSummary = useMemo(() => {
       const totalOriginal = cartItems.reduce((sum, item) => {
-        return sum + (parseFloat(item.price) * item.quantity);
+        return sum + (Number(item.price) || 0) * (Number(item.quantity) || 1);
       }, 0);
-      
+
       const totalDiscount = cartItems.reduce((sum, item) => {
-        const originalPrice = parseFloat(item.price);
-        const discountPercent = item.discount ? parseFloat(item.discount) : 0;
-        const discountAmount = discountPercent > 0 
-          ? originalPrice * (discountPercent / 100) * item.quantity
-          : 0;
+        const originalPrice = Number(item.price) || 0;
+        const discountPercent = Number(item.discount) || 0;
+        const quantity = Number(item.quantity) || 1;
+
+        const discountAmount =
+          discountPercent > 0
+            ? originalPrice * (discountPercent / 100) * quantity
+            : 0;
+
         return sum + discountAmount;
       }, 0);
-      
+
       return { totalOriginal, totalDiscount, finalTotal: subTotal };
     }, [cartItems, subTotal]);
 
@@ -839,12 +914,28 @@ const PaymentForm = forwardRef(
                     />
                   </div>
 
-                  <input type="hidden" name="streetNo" value={formData.streetNo} />
-                  <input type="hidden" name="streetName" value={formData.streetName} />
+                  <input
+                    type="hidden"
+                    name="streetNo"
+                    value={formData.streetNo}
+                  />
+                  <input
+                    type="hidden"
+                    name="streetName"
+                    value={formData.streetName}
+                  />
                   <input type="hidden" name="suburb" value={formData.suburb} />
                   <input type="hidden" name="state" value={formData.state} />
-                  <input type="hidden" name="postalCode" value={formData.postalCode} />
-                  <input type="hidden" name="country" value={formData.country} />
+                  <input
+                    type="hidden"
+                    name="postalCode"
+                    value={formData.postalCode}
+                  />
+                  <input
+                    type="hidden"
+                    name="country"
+                    value={formData.country}
+                  />
                 </div>
 
                 <div className="checkout-divider"></div>
@@ -900,14 +991,21 @@ const PaymentForm = forwardRef(
                   <div className="checkout-empty-cart">Your cart is empty.</div>
                 ) : (
                   cartItems.map((item, index) => {
-                    const hasDiscount = item.discount && parseFloat(item.discount) > 0;
-                    const originalPrice = parseFloat(item.price);
-                    const discountPercent = hasDiscount ? parseFloat(item.discount) : 0;
-                    const discountedPrice = hasDiscount 
+                    const originalPrice = Number(item.price) || 0;
+                    const discountPercent = Number(item.discount) || 0;
+                    const hasDiscount = discountPercent > 0;
+
+                    const discountedPrice = hasDiscount
                       ? originalPrice * (1 - discountPercent / 100)
                       : originalPrice;
-                    const savings = originalPrice - discountedPrice;
-                    
+
+                    const savings = hasDiscount
+                      ? originalPrice - discountedPrice
+                      : 0;
+
+                    const quantity =
+                      Number(item.quantity) > 0 ? Number(item.quantity) : 1;
+
                     return (
                       <motion.div
                         className={`checkout-order-item ${
@@ -935,6 +1033,7 @@ const PaymentForm = forwardRef(
                           <div className="checkout-order-info">
                             <h6 className="checkout-product-title mb-2">
                               {item.title}
+                              {item.weight ? ` (${item.weight}kg)` : ""}
                             </h6>
 
                             {hasDiscount && (
@@ -943,7 +1042,7 @@ const PaymentForm = forwardRef(
                                   {discountPercent}% OFF
                                 </span>
                                 <span className="discount-label">
-                                  {item.discount_name || 'Discount'}
+                                  {item.discount_name || "Discount"}
                                 </span>
                               </div>
                             )}
@@ -956,9 +1055,9 @@ const PaymentForm = forwardRef(
                               >
                                 <FaMinus />
                               </button>
-                              <span>
-                                {String(item.quantity).padStart(2, "0")}
-                              </span>
+
+                              <span>{String(quantity).padStart(2, "0")}</span>
+
                               <button
                                 type="button"
                                 onClick={() => formData.increaseQty(item.id)}
@@ -967,33 +1066,31 @@ const PaymentForm = forwardRef(
                                 <FaPlus />
                               </button>
                             </div>
-                            
-                            {item.weight && (
-                              <div className="product-weight mt-1">
-                                <small>Weight: {item.weight}g</small>
-                              </div>
-                            )}
                           </div>
                         </div>
 
                         <div className="checkout-order-right">
-                          <div className="checkout-item-price d-flex gap-1">
+                          <div className="checkout-item-price d-flex gap-2">
                             {hasDiscount ? (
                               <>
-                                <span className="original-price text-muted text-decoration-line-through">
-                                  ${originalPrice.toFixed(2)}
-                                </span>
-                                <span className="discounted-price">
-                                  ${discountedPrice.toFixed(2)}
-                                </span>
                                 {savings > 0 && (
                                   <span className="savings-amount">
                                     Save ${savings.toFixed(2)}
                                   </span>
                                 )}
+
+                                <span className="original-price text-muted text-decoration-line-through">
+                                  ${originalPrice.toFixed(2)}
+                                </span>
+
+                                <span className="discounted-price">
+                                  ${discountedPrice.toFixed(2)}
+                                </span>
                               </>
                             ) : (
-                              <span className="regular-price">${originalPrice.toFixed(2)}</span>
+                              <span className="regular-price">
+                                ${originalPrice.toFixed(2)}
+                              </span>
                             )}
                           </div>
 
@@ -1012,71 +1109,12 @@ const PaymentForm = forwardRef(
                 )}
               </div>
 
-              {discountSummary.totalDiscount > 0 && (
-                <div className="discount-summary">
-                  <div className="summary-row">
-                    <span>Original Total:</span>
-                    <span className="original-total">${discountSummary.totalOriginal.toFixed(2)}</span>
-                  </div>
-                  <div className="summary-row discount-row">
-                    <span>Discount Saved:</span>
-                    <span className="discount-saved">-${discountSummary.totalDiscount.toFixed(2)}</span>
-                  </div>
-                  <div className="summary-row">
-                    <span>Subtotal:</span>
-                    <span className="subtotal">${discountSummary.finalTotal.toFixed(2)}</span>
-                  </div>
-                </div>
-              )}
-
-              {/* Delivery Options Section */}
               <div className="delivery-options-section">
-                <div className="checkout-badge mb-3">Delivery Options</div>
                 <div className="delivery-weight-info mb-3">
-                  <span>Total Package Weight: <strong>{totalWeight}g</strong></span>
-                </div>
-                <div className="delivery-options">
-                  <label className="delivery-option">
-                    <input
-                      type="radio"
-                      name="deliveryType"
-                      value="standard"
-                      checked={selectedDeliveryType === "standard"}
-                      onChange={(e) => onDeliveryTypeChange(e.target.value)}
-                      disabled={loading || processingPayment}
-                    />
-                    <div className="delivery-option-content">
-                      <span className="delivery-title">Standard Delivery</span>
-                      <span className="delivery-price">${deliveryCharge.toFixed(2)}</span>
-                      <small className="delivery-description">
-                        {DELIVERY_OPTIONS.standard.find(option => 
-                          totalWeight >= option.minWeight && totalWeight < option.maxWeight
-                        )?.description || "5-8 business days"}
-                      </small>
-                    </div>
-                  </label>
-                  
-                  <label className="delivery-option">
-                    <input
-                      type="radio"
-                      name="deliveryType"
-                      value="express"
-                      checked={selectedDeliveryType === "express"}
-                      onChange={(e) => onDeliveryTypeChange(e.target.value)}
-                      disabled={loading || processingPayment}
-                    />
-                    <div className="delivery-option-content">
-                      <span className="delivery-title">Express Delivery</span>
-                      <span className="delivery-price">
-                        ${calculateDeliveryCharge(totalWeight, "express").toFixed(2)}
-                      </span>
-                      <small className="delivery-description">
-                        {DELIVERY_OPTIONS.express.find(option => 
-                          totalWeight >= option.minWeight && totalWeight < option.maxWeight
-                        )?.description || "1-2 business days"}
-                      </small>
-                    </div>
-                  </label>
+                  <span>
+                    Total Package Weight:{" "}
+                    <strong>{totalWeight.toFixed(2)} kg</strong>
+                  </span>
                 </div>
               </div>
 
@@ -1085,35 +1123,48 @@ const PaymentForm = forwardRef(
                   <span>SUB TOTAL ({totalItems} items):</span>
                   <strong>${subTotal.toFixed(2)}</strong>
                 </div>
-                
+
                 <div className="checkout-delivery-charge">
                   <span>DELIVERY CHARGE:</span>
                   <strong>${deliveryCharge.toFixed(2)}</strong>
                 </div>
-                
+
                 <div className="checkout-grand-total">
                   <span>TOTAL:</span>
-                  <strong>${grandTotal.toFixed(2)}</strong>
+                  <strong>${(subTotal + deliveryCharge).toFixed(2)}</strong>
                 </div>
 
                 <div className="checkout-btn-group">
                   <button
                     type="submit"
                     className="checkout-btn primary-btn"
-                    disabled={loading || processingPayment || cartItems.length === 0 || !stripe}
+                    disabled={
+                      loading ||
+                      processingPayment ||
+                      cartItems.length === 0 ||
+                      !stripe
+                    }
                   >
                     {processingPayment ? (
                       <>
-                        <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                        <span
+                          className="spinner-border spinner-border-sm me-2"
+                          role="status"
+                          aria-hidden="true"
+                        ></span>
                         Processing Payment...
                       </>
                     ) : loading ? (
                       <>
-                        <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                        <span
+                          className="spinner-border spinner-border-sm me-2"
+                          role="status"
+                          aria-hidden="true"
+                        ></span>
                         Placing Order...
                       </>
                     ) : (
-                      `Place Order • $${grandTotal.toFixed(2)}`
+                      `Place Order • $${(subTotal + deliveryCharge).toFixed(2)}`
                     )}
                   </button>
                 </div>
@@ -1153,20 +1204,24 @@ const Checkout = () => {
   const [showModal, setShowModal] = useState(false);
   const [addressError, setAddressError] = useState("");
   const [selectedDeliveryType, setSelectedDeliveryType] = useState("standard");
-  const [deliveryOptions, setDeliveryOptions] = useState(null);
+  const [deliveryOptions, setDeliveryOptions] = useState({});
+  const [deliveryOptionsLoading, setDeliveryOptionsLoading] = useState(false);
 
-  // Calculate total weight of all items
   const totalWeight = useMemo(() => {
     return cartItems.reduce((sum, item) => {
-      const itemWeight = item.weight || 0; // Assuming each product has a weight property in grams
-      return sum + (itemWeight * item.quantity);
+      const itemWeight = Number(item.weight) || 0;
+      const qty = Number(item.quantity) || 1;
+      return sum + itemWeight * qty;
     }, 0);
   }, [cartItems]);
 
-  // Calculate delivery charge based on total weight
   const deliveryCharge = useMemo(() => {
-    return calculateDeliveryCharge(totalWeight, selectedDeliveryType);
-  }, [totalWeight, selectedDeliveryType]);
+    return calculateDeliveryCharge(
+      totalWeight,
+      selectedDeliveryType,
+      deliveryOptions,
+    );
+  }, [totalWeight, selectedDeliveryType, deliveryOptions]);
 
   useEffect(() => {
     loadCartFromStorage();
@@ -1184,11 +1239,21 @@ const Checkout = () => {
   }, []);
 
   const fetchDeliveryOptionsFromAPI = async () => {
-    const options = await fetchDeliveryOptions();
-    if (options) {
-      setDeliveryOptions(options);
-      // Optionally update DELIVERY_OPTIONS with API data
-      console.log('Delivery options from API:', options);
+    try {
+      setDeliveryOptionsLoading(true);
+      const options = await fetchDeliveryOptions();
+      setDeliveryOptions(options || {});
+
+      const availableTypes = Object.keys(options || {});
+      if (availableTypes.length > 0) {
+        if (!availableTypes.includes(selectedDeliveryType)) {
+          setSelectedDeliveryType(availableTypes[0]);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to load delivery options:", err);
+    } finally {
+      setDeliveryOptionsLoading(false);
     }
   };
 
@@ -1208,17 +1273,27 @@ const Checkout = () => {
         const placesLibrary = await importLibrary("places");
         if (!isMounted) return;
 
-        const AutocompleteClass = placesLibrary.Autocomplete || window.google?.maps?.places?.Autocomplete;
+        const AutocompleteClass =
+          placesLibrary.Autocomplete ||
+          window.google?.maps?.places?.Autocomplete;
 
         if (!AutocompleteClass) {
           throw new Error("Autocomplete class not found");
         }
 
-        autocompleteRef.current = new AutocompleteClass(addressInputRef.current, {
-          types: ["address"],
-          fields: ["address_components", "formatted_address", "geometry", "name"],
-          componentRestrictions: { country: "au" },
-        });
+        autocompleteRef.current = new AutocompleteClass(
+          addressInputRef.current,
+          {
+            types: ["address"],
+            fields: [
+              "address_components",
+              "formatted_address",
+              "geometry",
+              "name",
+            ],
+            componentRestrictions: { country: "au" },
+          },
+        );
 
         autocompleteRef.current.addListener("place_changed", () => {
           const place = autocompleteRef.current.getPlace();
@@ -1228,7 +1303,9 @@ const Checkout = () => {
         setAddressError("");
       } catch (err) {
         console.error("[Autocomplete Debug] Google autocomplete failed:", err);
-        setAddressError("Address autocomplete is unavailable. Please enter your address manually.");
+        setAddressError(
+          "Address autocomplete is unavailable. Please enter your address manually.",
+        );
       }
     };
 
@@ -1237,7 +1314,9 @@ const Checkout = () => {
     return () => {
       isMounted = false;
       if (autocompleteRef.current && window.google?.maps?.event) {
-        window.google.maps.event.clearInstanceListeners(autocompleteRef.current);
+        window.google.maps.event.clearInstanceListeners(
+          autocompleteRef.current,
+        );
       }
     };
   }, []);
@@ -1268,34 +1347,50 @@ const Checkout = () => {
     const storedCart = JSON.parse(localStorage.getItem("adadaCart")) || [];
 
     const processedCart = storedCart.map((item) => {
-      // Handle nested discount object from API response
       let discountPercent = 0;
       let discountName = null;
-      
-      if (item.discount && typeof item.discount === 'object' && item.discount.discount_percentage) {
+
+      if (
+        item.discount &&
+        typeof item.discount === "object" &&
+        item.discount.discount_percentage
+      ) {
         discountPercent = parseFloat(item.discount.discount_percentage);
         discountName = item.discount.discount_name;
-      } else if (item.discount && typeof item.discount === 'number') {
+      } else if (item.discount && typeof item.discount === "number") {
         discountPercent = item.discount;
         discountName = item.discount_name;
       }
-      
-      const originalPrice = parseFloat(item.sell_price || item.price);
-      const finalPrice = discountPercent > 0 
-        ? originalPrice * (1 - discountPercent / 100)
-        : originalPrice;
-      
+
+      const originalPrice = parseFloat(item.sell_price || item.price || 0);
+      const finalPrice =
+        discountPercent > 0
+          ? originalPrice * (1 - discountPercent / 100)
+          : originalPrice;
+
+      let itemWeightKg = 0.25;
+
+      if (item.dimensions && item.dimensions.weight !== undefined && item.dimensions.weight !== null) {
+        itemWeightKg = parseFloat(item.dimensions.weight);
+      } else if (item.weight !== undefined && item.weight !== null) {
+        itemWeightKg = parseFloat(item.weight);
+      }
+
+      if (Number.isNaN(itemWeightKg) || itemWeightKg < 0) {
+        itemWeightKg = 0.25;
+      }
+
       return {
         id: item.id,
         title: item.title || item.product_name,
         price: originalPrice,
         discount: discountPercent,
         discount_name: discountName,
-        finalPrice: finalPrice,
+        finalPrice,
         image: item.image,
         description: item.description || "",
         quantity: parseInt(item.quantity, 10) || 1,
-        weight: item.weight || 250, // Default weight if not specified (in grams)
+        weight: itemWeightKg,
       };
     });
 
@@ -1310,11 +1405,12 @@ const Checkout = () => {
 
   const subTotal = useMemo(() => {
     return cartItems.reduce((sum, item) => {
-      const originalPrice = parseFloat(item.price);
+      const originalPrice = parseFloat(item.price || 0);
       const discountPercent = item.discount ? parseFloat(item.discount) : 0;
-      const finalPrice = discountPercent > 0 
-        ? originalPrice * (1 - discountPercent / 100)
-        : originalPrice;
+      const finalPrice =
+        discountPercent > 0
+          ? originalPrice * (1 - discountPercent / 100)
+          : originalPrice;
       return sum + finalPrice * item.quantity;
     }, 0);
   }, [cartItems]);
@@ -1344,18 +1440,26 @@ const Checkout = () => {
       if (!place?.address_components) return;
 
       const getComponent = (type) => {
-        const component = place.address_components.find((c) => c.types.includes(type));
+        const component = place.address_components.find((c) =>
+          c.types.includes(type),
+        );
         return component ? component.long_name : "";
       };
 
       const streetNumber = getComponent("street_number");
       const route = getComponent("route");
-      const suburb = getComponent("locality") || getComponent("sublocality") || getComponent("sublocality_level_1");
+      const suburb =
+        getComponent("locality") ||
+        getComponent("sublocality") ||
+        getComponent("sublocality_level_1");
       const state = getComponent("administrative_area_level_1");
       const postalCode = getComponent("postal_code");
       const country = getComponent("country");
 
-      const fullStreetName = streetNumber && route ? `${streetNumber} ${route}` : route || streetNumber || "";
+      const fullStreetName =
+        streetNumber && route
+          ? `${streetNumber} ${route}`
+          : route || streetNumber || "";
 
       setFormData((prev) => ({
         ...prev,
@@ -1375,17 +1479,26 @@ const Checkout = () => {
 
   const validateAddress = () => {
     try {
-      if (formData.streetName && formData.suburb && formData.state && formData.postalCode) {
+      if (
+        formData.streetName &&
+        formData.suburb &&
+        formData.state &&
+        formData.postalCode
+      ) {
         return true;
       }
 
       const manualAddress = addressInputRef.current?.value?.trim();
 
       if (manualAddress && manualAddress.length > 5) {
-        const addressParts = manualAddress.split(",").map((part) => part.trim());
+        const addressParts = manualAddress
+          .split(",")
+          .map((part) => part.trim());
 
         if (addressParts.length >= 3) {
-          const stateAndPostcode = addressParts[addressParts.length - 1]?.trim()?.split(/\s+/);
+          const stateAndPostcode = addressParts[addressParts.length - 1]
+            ?.trim()
+            ?.split(/\s+/);
           const derivedState = stateAndPostcode?.[0] || "";
           const derivedPostcode = stateAndPostcode?.[1] || "";
 
@@ -1412,14 +1525,16 @@ const Checkout = () => {
 
   const decreaseQty = (id) => {
     const updatedCart = cartItems.map((item) =>
-      item.id === id ? { ...item, quantity: item.quantity > 1 ? item.quantity - 1 : 1 } : item
+      item.id === id
+        ? { ...item, quantity: item.quantity > 1 ? item.quantity - 1 : 1 }
+        : item,
     );
     updateCartAndStorage(updatedCart);
   };
 
   const increaseQty = (id) => {
     const updatedCart = cartItems.map((item) =>
-      item.id === id ? { ...item, quantity: item.quantity + 1 } : item
+      item.id === id ? { ...item, quantity: item.quantity + 1 } : item,
     );
     updateCartAndStorage(updatedCart);
   };
@@ -1515,16 +1630,30 @@ const Checkout = () => {
           </motion.div>
 
           {error && (
-            <div className="alert alert-danger alert-dismissible fade show mb-4" role="alert">
+            <div
+              className="alert alert-danger alert-dismissible fade show mb-4"
+              role="alert"
+            >
               <strong>Error:</strong> {error}
-              <button type="button" className="btn-close" onClick={() => setError(null)}></button>
+              <button
+                type="button"
+                className="btn-close"
+                onClick={() => setError(null)}
+              ></button>
             </div>
           )}
 
           {success && (
-            <div className="alert alert-success alert-dismissible fade show mb-4" role="alert">
+            <div
+              className="alert alert-success alert-dismissible fade show mb-4"
+              role="alert"
+            >
               <strong>Success:</strong> {success}
-              <button type="button" className="btn-close" onClick={() => setSuccess(null)}></button>
+              <button
+                type="button"
+                className="btn-close"
+                onClick={() => setSuccess(null)}
+              ></button>
             </div>
           )}
 
