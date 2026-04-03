@@ -37,6 +37,85 @@ const stripePromise = loadStripe(
   "pk_test_51T6ky36nDiic8XlH4wGGMNX2VgNqrXqMBCBx5G0YNwWmCs5MVUkLCCpGitUZcWm35JQ8YcSa2PYzr1lEezzZxuPC00KDmlUv6J",
 );
 
+// Delivery options mapping based on weight ranges
+const DELIVERY_OPTIONS = {
+  standard: [
+    { minWeight: 0, maxWeight: 250, title: "Standard Shipping (0-250g)", price: 9.70, description: "3-5 business days delivery" },
+    { minWeight: 250, maxWeight: 500, title: "Standard Shipping (250g-500g)", price: 11.15, description: "5-8 working days delivery" },
+    { minWeight: 500, maxWeight: 1000, title: "Standard Shipping (500g-1kg)", price: 15.25, description: "5-8 working days delivery" },
+    { minWeight: 1000, maxWeight: 3000, title: "Standard Shipping (1kg-3kg)", price: 19.30, description: "5-8 working days delivery" },
+  ],
+  express: [
+    { minWeight: 0, maxWeight: 500, title: "Express Shipping (0-500g)", price: 14.65, description: "1-2 working days delivery" },
+    { minWeight: 500, maxWeight: 1000, title: "Express Shipping (500g-1kg)", price: 19.25, description: "1-2 working days delivery" },
+  ]
+};
+
+// Helper function to calculate delivery charge based on weight
+const calculateDeliveryCharge = (totalWeight, deliveryType = "standard") => {
+  if (totalWeight <= 0) return 0;
+  
+  const options = DELIVERY_OPTIONS[deliveryType] || DELIVERY_OPTIONS.standard;
+  const applicableOption = options.find(option => 
+    totalWeight >= option.minWeight && totalWeight < option.maxWeight
+  );
+  
+  // For weights above the max range, use the highest tier
+  if (!applicableOption && options.length > 0) {
+    const maxOption = options.reduce((prev, current) => 
+      (prev.maxWeight > current.maxWeight) ? prev : current
+    );
+    return maxOption.price;
+  }
+  
+  return applicableOption ? applicableOption.price : 0;
+};
+
+// Function to fetch delivery options from API
+const fetchDeliveryOptions = async () => {
+  try {
+    const response = await fetch('https://urbanviewre.com/chai-backend/api/delivery-options', {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error('Failed to fetch delivery options');
+    }
+    
+    const result = await response.json();
+    if (result.status === 'success' && result.data) {
+      // Parse and organize delivery options from API
+      const standardOptions = [];
+      const expressOptions = [];
+      
+      result.data.forEach(option => {
+        const optionData = {
+          option_id: option.option_id,
+          title: option.delivery_title,
+          price: parseFloat(option.delivery_price),
+          description: option.deleivery_description
+        };
+        
+        if (option.delivery_title.toLowerCase().includes('express')) {
+          expressOptions.push(optionData);
+        } else {
+          standardOptions.push(optionData);
+        }
+      });
+      
+      return { standard: standardOptions, express: expressOptions };
+    }
+    return null;
+  } catch (error) {
+    console.error('Error fetching delivery options:', error);
+    return null;
+  }
+};
+
 const SuccessModal = ({ isOpen, onClose, orderResult }) => {
   const [viewLoading, setViewLoading] = useState(false);
   const [downloadLoading, setDownloadLoading] = useState(false);
@@ -418,6 +497,10 @@ const PaymentForm = forwardRef(
       cartItems,
       subTotal,
       totalItems,
+      totalWeight,
+      deliveryCharge,
+      selectedDeliveryType,
+      onDeliveryTypeChange,
       onSuccess,
       onError,
       loading,
@@ -546,6 +629,9 @@ const PaymentForm = forwardRef(
           country: formData.country,
           address_line1: fullAddress || formData.streetName,
           city: formData.suburb,
+          delivery_charge: deliveryCharge,
+          delivery_type: selectedDeliveryType,
+          total_weight: totalWeight,
           products: cartItems.map((item) => {
             const originalPrice = parseFloat(item.price);
             const discountPercent = item.discount ? parseFloat(item.discount) : 0;
@@ -560,6 +646,7 @@ const PaymentForm = forwardRef(
               original_price: originalPrice,
               discount_percent: discountPercent,
               discount_name: item.discount_name || null,
+              weight: item.weight || 0, // Add weight to product data
             };
           }),
           card_number: token.id,
@@ -650,6 +737,8 @@ const PaymentForm = forwardRef(
       
       return { totalOriginal, totalDiscount, finalTotal: subTotal };
     }, [cartItems, subTotal]);
+
+    const grandTotal = subTotal + deliveryCharge;
 
     return (
       <form onSubmit={handleSubmit}>
@@ -878,6 +967,12 @@ const PaymentForm = forwardRef(
                                 <FaPlus />
                               </button>
                             </div>
+                            
+                            {item.weight && (
+                              <div className="product-weight mt-1">
+                                <small>Weight: {item.weight}g</small>
+                              </div>
+                            )}
                           </div>
                         </div>
 
@@ -927,17 +1022,78 @@ const PaymentForm = forwardRef(
                     <span>Discount Saved:</span>
                     <span className="discount-saved">-${discountSummary.totalDiscount.toFixed(2)}</span>
                   </div>
-                  <div className="summary-row final-total-row">
-                    <span>Final Total:</span>
-                    <span className="final-total">${discountSummary.finalTotal.toFixed(2)}</span>
+                  <div className="summary-row">
+                    <span>Subtotal:</span>
+                    <span className="subtotal">${discountSummary.finalTotal.toFixed(2)}</span>
                   </div>
                 </div>
               )}
+
+              {/* Delivery Options Section */}
+              <div className="delivery-options-section">
+                <div className="checkout-badge mb-3">Delivery Options</div>
+                <div className="delivery-weight-info mb-3">
+                  <span>Total Package Weight: <strong>{totalWeight}g</strong></span>
+                </div>
+                <div className="delivery-options">
+                  <label className="delivery-option">
+                    <input
+                      type="radio"
+                      name="deliveryType"
+                      value="standard"
+                      checked={selectedDeliveryType === "standard"}
+                      onChange={(e) => onDeliveryTypeChange(e.target.value)}
+                      disabled={loading || processingPayment}
+                    />
+                    <div className="delivery-option-content">
+                      <span className="delivery-title">Standard Delivery</span>
+                      <span className="delivery-price">${deliveryCharge.toFixed(2)}</span>
+                      <small className="delivery-description">
+                        {DELIVERY_OPTIONS.standard.find(option => 
+                          totalWeight >= option.minWeight && totalWeight < option.maxWeight
+                        )?.description || "5-8 business days"}
+                      </small>
+                    </div>
+                  </label>
+                  
+                  <label className="delivery-option">
+                    <input
+                      type="radio"
+                      name="deliveryType"
+                      value="express"
+                      checked={selectedDeliveryType === "express"}
+                      onChange={(e) => onDeliveryTypeChange(e.target.value)}
+                      disabled={loading || processingPayment}
+                    />
+                    <div className="delivery-option-content">
+                      <span className="delivery-title">Express Delivery</span>
+                      <span className="delivery-price">
+                        ${calculateDeliveryCharge(totalWeight, "express").toFixed(2)}
+                      </span>
+                      <small className="delivery-description">
+                        {DELIVERY_OPTIONS.express.find(option => 
+                          totalWeight >= option.minWeight && totalWeight < option.maxWeight
+                        )?.description || "1-2 business days"}
+                      </small>
+                    </div>
+                  </label>
+                </div>
+              </div>
 
               <div className="checkout-footer">
                 <div className="checkout-subtotal">
                   <span>SUB TOTAL ({totalItems} items):</span>
                   <strong>${subTotal.toFixed(2)}</strong>
+                </div>
+                
+                <div className="checkout-delivery-charge">
+                  <span>DELIVERY CHARGE:</span>
+                  <strong>${deliveryCharge.toFixed(2)}</strong>
+                </div>
+                
+                <div className="checkout-grand-total">
+                  <span>TOTAL:</span>
+                  <strong>${grandTotal.toFixed(2)}</strong>
                 </div>
 
                 <div className="checkout-btn-group">
@@ -957,7 +1113,7 @@ const PaymentForm = forwardRef(
                         Placing Order...
                       </>
                     ) : (
-                      "Place Order"
+                      `Place Order • $${grandTotal.toFixed(2)}`
                     )}
                   </button>
                 </div>
@@ -996,9 +1152,25 @@ const Checkout = () => {
   const [orderResult, setOrderResult] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [addressError, setAddressError] = useState("");
+  const [selectedDeliveryType, setSelectedDeliveryType] = useState("standard");
+  const [deliveryOptions, setDeliveryOptions] = useState(null);
+
+  // Calculate total weight of all items
+  const totalWeight = useMemo(() => {
+    return cartItems.reduce((sum, item) => {
+      const itemWeight = item.weight || 0; // Assuming each product has a weight property in grams
+      return sum + (itemWeight * item.quantity);
+    }, 0);
+  }, [cartItems]);
+
+  // Calculate delivery charge based on total weight
+  const deliveryCharge = useMemo(() => {
+    return calculateDeliveryCharge(totalWeight, selectedDeliveryType);
+  }, [totalWeight, selectedDeliveryType]);
 
   useEffect(() => {
     loadCartFromStorage();
+    fetchDeliveryOptionsFromAPI();
 
     const handleCartUpdated = () => {
       loadCartFromStorage();
@@ -1010,6 +1182,15 @@ const Checkout = () => {
       window.removeEventListener("cartUpdated", handleCartUpdated);
     };
   }, []);
+
+  const fetchDeliveryOptionsFromAPI = async () => {
+    const options = await fetchDeliveryOptions();
+    if (options) {
+      setDeliveryOptions(options);
+      // Optionally update DELIVERY_OPTIONS with API data
+      console.log('Delivery options from API:', options);
+    }
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -1114,6 +1295,7 @@ const Checkout = () => {
         image: item.image,
         description: item.description || "",
         quantity: parseInt(item.quantity, 10) || 1,
+        weight: item.weight || 250, // Default weight if not specified (in grams)
       };
     });
 
@@ -1247,6 +1429,10 @@ const Checkout = () => {
     updateCartAndStorage(updatedCart);
   };
 
+  const handleDeliveryTypeChange = (type) => {
+    setSelectedDeliveryType(type);
+  };
+
   const handleOrderSuccess = (result) => {
     setOrderResult(result);
     localStorage.removeItem("adadaCart");
@@ -1356,6 +1542,10 @@ const Checkout = () => {
               cartItems={cartItems}
               subTotal={subTotal}
               totalItems={totalItems}
+              totalWeight={totalWeight}
+              deliveryCharge={deliveryCharge}
+              selectedDeliveryType={selectedDeliveryType}
+              onDeliveryTypeChange={handleDeliveryTypeChange}
               onSuccess={handleOrderSuccess}
               onError={handleOrderError}
               loading={loading}
