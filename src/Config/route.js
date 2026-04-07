@@ -97,16 +97,12 @@ export const orderAPI = {
     } catch (error) {
       console.error("Error placing order:", error);
       if (error.response) {
-        // The request was made and the server responded with a status code
-        // that falls out of the range of 2xx
         throw new Error(error.response.data.message || "Failed to place order");
       } else if (error.request) {
-        // The request was made but no response was received
         throw new Error(
           "No response from server. Please check your connection.",
         );
       } else {
-        // Something happened in setting up the request that triggered an Error
         throw new Error(
           error.message || "An error occurred while placing order",
         );
@@ -114,9 +110,52 @@ export const orderAPI = {
     }
   },
 
+  // Stripe Payment Intent endpoints
+  createPaymentIntent: async (orderData) => {
+    try {
+      const response = await api.post("/guest/create-payment-intent", orderData);
+      console.log("Create payment intent response:", response.data);
+      return response.data; // This returns { status: "success", data: {...} }
+    } catch (error) {
+      console.error("Create payment intent API error:", error);
+      throw error;
+    }
+  },
+  
+  confirmOrder: async (data) => {
+    try {
+      const response = await api.post("/guest/confirm-order", data);
+      console.log("Confirm order response:", response.data);
+      return response.data;
+    } catch (error) {
+      console.error("Confirm order API error:", error);
+      throw error;
+    }
+  },
+  
+  getPaymentStatus: async (paymentIntentId) => {
+    try {
+      const response = await api.get(`/guest/payment-status/${paymentIntentId}`);
+      return response.data;
+    } catch (error) {
+      console.error("Get payment status error:", error);
+      throw error;
+    }
+  },
+  
+  cancelPaymentIntent: async (data) => {
+    try {
+      const response = await api.post("/guest/cancel-payment", data);
+      console.log("Cancel payment response:", response.data);
+      return response.data;
+    } catch (error) {
+      console.error("Cancel payment error:", error);
+      throw error;
+    }
+  },
+
   // Invoice endpoints
   getInvoiceByToken: (token) => api.get(`/invoices/view/${token}`),
-
   downloadInvoice: (token) =>
     api.get(`/invoices/download/${token}`, {
       responseType: "blob",
@@ -168,5 +207,18 @@ export const contactAPI = {
         );
       }
     }
+  },
+};
+
+// Delivery Options API
+export const deliveryAPI = {
+  // Get all delivery options from backend
+  getDeliveryOptions: () => {
+    return api.get('/delivery-options')
+      .then(response => response.data)
+      .catch(error => {
+        console.error('Failed to fetch delivery options:', error);
+        throw error.response?.data || error;
+      });
   },
 };

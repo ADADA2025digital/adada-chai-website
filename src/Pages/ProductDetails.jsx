@@ -126,7 +126,7 @@ const ProductDetails = () => {
 
         let discountPercentage = 0;
         let finalPrice = parseFloat(product.sell_price) || 0;
-        
+
         if (product.discount && product.discount.discount_percentage) {
           discountPercentage = parseFloat(product.discount.discount_percentage);
           finalPrice = finalPrice * (1 - discountPercentage / 100);
@@ -152,7 +152,7 @@ const ProductDetails = () => {
 
         // Extract dimensions from the product object
         const dimensions = product.dimensions || {};
-        
+
         return {
           id: product.product_id || product.id,
           title: product.product_name || product.name || "Untitled Product",
@@ -424,7 +424,7 @@ const ProductDetails = () => {
 
                   {allImages.length > 0 && (
                     <div className="mt-3">
-                      <div className="row g-2">
+                      <div className="row g-2 justify-content-center">
                         {visibleThumbs.map((img, index) => {
                           const actualIndex = thumbStartIndex + index;
                           const isActive = selectedImage === img;
@@ -526,14 +526,17 @@ const ProductDetails = () => {
                         ${Number(product.original_price).toFixed(2)}
                       </span>
                       {product.discount_percentage > 0 && (
-                        <span className="ms-2" style={{ 
-                          backgroundColor: "#d9932f", 
-                          color: "#fff", 
-                          padding: "2px 8px", 
-                          borderRadius: "20px",
-                          fontSize: "12px",
-                          fontWeight: "600"
-                        }}>
+                        <span
+                          className="ms-2"
+                          style={{
+                            backgroundColor: "#d9932f",
+                            color: "#fff",
+                            padding: "2px 8px",
+                            borderRadius: "20px",
+                            fontSize: "12px",
+                            fontWeight: "600",
+                          }}
+                        >
                           {product.discount_percentage}% OFF
                         </span>
                       )}
@@ -583,29 +586,54 @@ const ProductDetails = () => {
                   )}
 
                   {/* Dimensions Section */}
-                  {(product.height || product.width || product.length || product.weight) && (
+                  {(product.height ||
+                    product.width ||
+                    product.length ||
+                    product.weight) && (
                     <div className="mt-3 pt-2">
-                      <h6 className="fw-bold mb-2" style={{ color: "#8f6238", fontSize: "14px" }}>
+                      <h6
+                        className="fw-bold mb-2"
+                        style={{ color: "#8f6238", fontSize: "14px" }}
+                      >
                         Dimensions
                       </h6>
-                      <div className="dimensions-grid" style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "8px" }}>
+                      <div
+                        className="dimensions-grid"
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "repeat(2, 1fr)",
+                          gap: "8px",
+                        }}
+                      >
                         {product.height && (
-                          <p className="mb-1 product-info-text" style={{ fontSize: "13px" }}>
+                          <p
+                            className="mb-1 product-info-text"
+                            style={{ fontSize: "13px" }}
+                          >
                             <strong>Height :</strong> {product.height} cm
                           </p>
                         )}
                         {product.width && (
-                          <p className="mb-1 product-info-text" style={{ fontSize: "13px" }}>
+                          <p
+                            className="mb-1 product-info-text"
+                            style={{ fontSize: "13px" }}
+                          >
                             <strong>Width :</strong> {product.width} cm
                           </p>
                         )}
                         {product.length && (
-                          <p className="mb-1 product-info-text" style={{ fontSize: "13px" }}>
+                          <p
+                            className="mb-1 product-info-text"
+                            style={{ fontSize: "13px" }}
+                          >
                             <strong>Length :</strong> {product.length} cm
                           </p>
                         )}
                         {product.weight && (
-                          <p className="mb-1 product-info-text" style={{ fontSize: "13px" }}>
+                          <p
+                            className="mb-1 product-info-text"
+                            style={{ fontSize: "13px" }}
+                          >
                             <strong>Weight :</strong> {product.weight} kg
                           </p>
                         )}

@@ -18,161 +18,198 @@ import { motion, AnimatePresence } from "framer-motion";
 import { loadStripe } from "@stripe/stripe-js";
 import {
   Elements,
-  CardElement,
+  PaymentElement,
   useStripe,
   useElements,
 } from "@stripe/react-stripe-js";
-import { setOptions, importLibrary } from "@googlemaps/js-api-loader";
 import Banner from "../Components/Banner";
 import bannerBg from "../assets/images/about-banner.png";
 import cupOutlineLeft from "../assets/images/browncup.png";
 import cupOutlineRight from "../assets/images/browncinamon.png";
 import smicon from "../assets/images/smicon.png";
-import { orderAPI } from "../Config/route";
+import { orderAPI, deliveryAPI } from "../Config/route";
 import ReCAPTCHA from "react-google-recaptcha";
 
-const DEFAULT_COUNTRY = "Sri Lanka";
+const DEFAULT_COUNTRY = "Australia";
 
 const stripePromise = loadStripe(
   "pk_test_51T6ky36nDiic8XlH4wGGMNX2VgNqrXqMBCBx5G0YNwWmCs5MVUkLCCpGitUZcWm35JQ8YcSa2PYzr1lEezzZxuPC00KDmlUv6J",
 );
 
-const normalizeDeliveryType = (title = "") => {
-  const lower = title.toLowerCase();
-  if (lower.includes("express")) return "express";
-  return "standard";
-};
+// Helper function to parse weight range from delivery title
+const parseWeightRange = (title) => {
+  if (!title) return null;
 
-const parseWeightValueToKg = (value = "") => {
-  const clean = value.toLowerCase().trim();
+  console.log("Parsing title:", title);
 
-  if (clean.endsWith("kg")) {
-    const num = parseFloat(clean.replace("kg", "").trim());
-    return Number.isNaN(num) ? null : num;
+  let rangePart = title;
+  const parenMatch = title.match(/\(([^)]+)\)/);
+  if (parenMatch) {
+    rangePart = parenMatch[1];
   }
 
-  if (clean.endsWith("g")) {
-    const num = parseFloat(clean.replace("g", "").trim());
-    return Number.isNaN(num) ? null : num / 1000;
-  }
+  const patterns = [
+    /(\d+(?:\.\d+)?)\s*(g|kg)?\s*-\s*(\d+(?:\.\d+)?)\s*(g|kg)/i,
+    /(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*(g|kg)/i,
+  ];
 
-  const fallback = parseFloat(clean);
-  return Number.isNaN(fallback) ? null : fallback;
-};
+  let min, max, minUnit, maxUnit;
 
-const parseWeightRangeFromTitle = (title = "") => {
-  const match = title.match(/\((.*?)\)/);
-  if (!match) return null;
+  for (const pattern of patterns) {
+    const match = rangePart.match(pattern);
+    if (match) {
+      if (match.length === 5) {
+        min = parseFloat(match[1]);
+        minUnit = match[2];
+        max = parseFloat(match[3]);
+        maxUnit = match[4];
+      } else if (match.length === 4) {
+        min = parseFloat(match[1]);
+        max = parseFloat(match[2]);
+        maxUnit = match[3];
 
-  const rangeText = match[1].trim();
-  const parts = rangeText.split("-").map((p) => p.trim());
-
-  if (parts.length !== 2) return null;
-
-  const minWeight = parseWeightValueToKg(parts[0]);
-  const maxWeight = parseWeightValueToKg(parts[1]);
-
-  if (minWeight === null || maxWeight === null) return null;
-
-  return { minWeight, maxWeight };
-};
-
-const fetchDeliveryOptions = async () => {
-  try {
-    const response = await fetch(
-      "https://urbanviewre.com/chai-backend/api/delivery-options",
-      {
-        method: "GET",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
-      },
-    );
-
-    if (!response.ok) {
-      throw new Error("Failed to fetch delivery options");
-    }
-
-    const result = await response.json();
-
-    if (result.status === "success" && Array.isArray(result.data)) {
-      const grouped = {};
-
-      result.data.forEach((option) => {
-        const title = option.delivery_title || "";
-        const range = parseWeightRangeFromTitle(title);
-        const deliveryType = normalizeDeliveryType(title);
-
-        if (!range) return;
-
-        const optionData = {
-          option_id: option.option_id,
-          title,
-          price: parseFloat(option.delivery_price || 0),
-          description: option.deleivery_description || "",
-          minWeight: range.minWeight,
-          maxWeight: range.maxWeight,
-          deliveryType,
-          created_at: option.created_at,
-          updated_at: option.updated_at,
-        };
-
-        if (!grouped[deliveryType]) {
-          grouped[deliveryType] = [];
+        if (rangePart.toLowerCase().includes(`${min}kg`)) {
+          minUnit = "kg";
+        } else if (rangePart.toLowerCase().includes(`${min}g`)) {
+          minUnit = "g";
         }
-
-        grouped[deliveryType].push(optionData);
-      });
-
-      Object.keys(grouped).forEach((type) => {
-        grouped[type] = grouped[type].sort(
-          (a, b) => a.minWeight - b.minWeight,
-        );
-      });
-
-      return grouped;
+      }
+      break;
     }
-
-    return {};
-  } catch (error) {
-    console.error("Error fetching delivery options:", error);
-    return {};
   }
+
+  if (min === undefined || max === undefined) {
+    const numbers = rangePart.match(/(\d+(?:\.\d+)?)/g);
+    if (numbers && numbers.length >= 2) {
+      min = parseFloat(numbers[0]);
+      max = parseFloat(numbers[1]);
+
+      const kgMatch = rangePart.match(/kg/i);
+      const gMatch = rangePart.match(/g(?!\w)/i);
+
+      if (kgMatch && !gMatch) {
+        maxUnit = "kg";
+        if (max < 100) minUnit = "kg";
+      } else {
+        maxUnit = "g";
+      }
+    }
+  }
+
+  if (min === undefined || max === undefined) {
+    console.log("Failed to parse:", title);
+    return null;
+  }
+
+  let minWeight = min;
+  let maxWeight = max;
+
+  if (
+    minUnit === "kg" ||
+    (minUnit === undefined && min < 100 && rangePart.toLowerCase().includes("kg"))
+  ) {
+    minWeight = min * 1000;
+  }
+
+  if (maxUnit === "kg") {
+    maxWeight = max * 1000;
+  }
+
+  const result = { minWeight, maxWeight };
+  console.log(`Parsed "${title}" -> min: ${minWeight}g, max: ${maxWeight}g`);
+  return result;
 };
 
-const calculateDeliveryCharge = (
-  totalWeightKg,
-  selectedDeliveryType,
+const calculateDeliveryChargeFromAPI = (
+  totalWeight,
+  deliveryType,
   deliveryOptions,
 ) => {
-  if (!totalWeightKg || totalWeightKg <= 0) return 0;
-  if (!deliveryOptions || typeof deliveryOptions !== "object") return 0;
+  if (!deliveryOptions || deliveryOptions.length === 0) return 0;
+  if (totalWeight <= 0) return 0;
 
-  const options = deliveryOptions[selectedDeliveryType] || [];
-  if (!options.length) return 0;
+  const typeOptions = deliveryOptions.filter((option) =>
+    option.delivery_title?.toLowerCase().includes(deliveryType.toLowerCase()),
+  );
 
-  const applicableOption = options.find((option) => {
-    const isLastTier = option === options[options.length - 1];
+  if (typeOptions.length === 0) return 0;
 
-    if (isLastTier) {
-      return totalWeightKg >= option.minWeight && totalWeightKg <= option.maxWeight;
+  let applicableOption = null;
+
+  for (const option of typeOptions) {
+    const range = parseWeightRange(option.delivery_title);
+    if (range) {
+      const minWeight = range.minWeight;
+      const maxWeight = range.maxWeight;
+
+      if (totalWeight >= minWeight && totalWeight <= maxWeight) {
+        applicableOption = option;
+        break;
+      }
+    }
+  }
+
+  if (!applicableOption && typeOptions.length > 0) {
+    let highestMax = 0;
+    let highestOption = null;
+
+    for (const option of typeOptions) {
+      const range = parseWeightRange(option.delivery_title);
+      if (range && range.maxWeight > highestMax) {
+        highestMax = range.maxWeight;
+        highestOption = option;
+      }
     }
 
-    return totalWeightKg >= option.minWeight && totalWeightKg < option.maxWeight;
-  });
-
-  if (applicableOption) {
-    return Number(applicableOption.price) || 0;
+    if (highestOption) {
+      applicableOption = highestOption;
+    } else {
+      applicableOption = typeOptions[0];
+    }
   }
 
-  const lastTier = options[options.length - 1];
+  return applicableOption
+    ? parseFloat(applicableOption.delivery_price || 0)
+    : 0;
+};
 
-  if (lastTier && totalWeightKg > lastTier.maxWeight) {
-    return Number(lastTier.price) || 0;
+const getAvailableDeliveryOptions = (totalWeight, deliveryOptions) => {
+  if (!deliveryOptions || deliveryOptions.length === 0) {
+    return { standard: null, express: null };
   }
 
-  return 0;
+  console.log("Getting available options for weight:", totalWeight, "g");
+
+  let standardOption = null;
+  let expressOption = null;
+
+  for (const option of deliveryOptions) {
+    const range = parseWeightRange(option.delivery_title);
+    if (range) {
+      const minWeight = range.minWeight;
+      const maxWeight = range.maxWeight;
+
+      console.log(
+        `Checking ${option.delivery_title}: ${minWeight}g - ${maxWeight}g, weight: ${totalWeight}g, match: ${
+          totalWeight >= minWeight && totalWeight <= maxWeight
+        }`,
+      );
+
+      if (totalWeight >= minWeight && totalWeight <= maxWeight) {
+        if (option.delivery_title.toLowerCase().includes("standard")) {
+          standardOption = option;
+          console.log("Found standard option:", option);
+        } else if (option.delivery_title.toLowerCase().includes("express")) {
+          expressOption = option;
+          console.log("Found express option:", option);
+        }
+      }
+    }
+  }
+
+  const result = { standard: standardOption, express: expressOption };
+  console.log("Available options result:", result);
+  return result;
 };
 
 const SuccessModal = ({ isOpen, onClose, orderResult }) => {
@@ -186,11 +223,13 @@ const SuccessModal = ({ isOpen, onClose, orderResult }) => {
   const transaction = orderData?.transaction;
   const items = orderData?.items || [];
 
-  const totalAmount = items
-    .reduce((sum, item) => {
-      return sum + item.quantity * parseFloat(item.order_price);
-    }, 0)
-    .toFixed(2);
+  const subtotal = items.reduce((sum, item) => {
+    return sum + item.quantity * parseFloat(item.order_price);
+  }, 0);
+
+  const deliveryCharge = parseFloat(orderData?.delivery_charge || 0);
+  const grandTotal = (subtotal + deliveryCharge).toFixed(2);
+  const subtotalFormatted = subtotal.toFixed(2);
 
   const itemCount = items.reduce((sum, item) => sum + item.quantity, 0);
 
@@ -381,9 +420,23 @@ const SuccessModal = ({ isOpen, onClose, orderResult }) => {
                       </div>
 
                       <div className="summary-row">
+                        <span className="summary-label">Subtotal:</span>
+                        <span className="summary-value">
+                          ${subtotalFormatted}
+                        </span>
+                      </div>
+
+                      <div className="summary-row">
+                        <span className="summary-label">Delivery Charge:</span>
+                        <span className="summary-value price">
+                          ${deliveryCharge.toFixed(2)}
+                        </span>
+                      </div>
+
+                      <div className="summary-row">
                         <span className="summary-label">Total Amount:</span>
                         <span className="summary-value price">
-                          ${totalAmount}
+                          ${grandTotal}
                         </span>
                       </div>
 
@@ -457,12 +510,16 @@ const SuccessModal = ({ isOpen, onClose, orderResult }) => {
                               {item.product?.product_name || "Product"}
                             </span>
                             <span className="item-details">
-                              {item.quantity} × ${parseFloat(item.order_price).toFixed(2)}
+                              {item.quantity} × $
+                              {parseFloat(item.order_price).toFixed(2)}
                             </span>
                           </div>
 
                           <div className="item-total">
-                            ${(item.quantity * parseFloat(item.order_price)).toFixed(2)}
+                            $
+                            {(
+                              item.quantity * parseFloat(item.order_price)
+                            ).toFixed(2)}
                           </div>
                         </div>
                       ))}
@@ -544,7 +601,7 @@ const SuccessModal = ({ isOpen, onClose, orderResult }) => {
   );
 };
 
-const PaymentForm = forwardRef(
+const PaymentFormComponent = forwardRef(
   (
     {
       formData,
@@ -553,267 +610,111 @@ const PaymentForm = forwardRef(
       totalItems,
       totalWeight,
       deliveryCharge,
+      grandTotal,
       selectedDeliveryType,
       onDeliveryTypeChange,
       onSuccess,
       onError,
       loading,
       setLoading,
-      addressInputRef,
-      autocompleteRef,
-      addressError,
-      validateAddress,
+      clientSecret,
+      setShowPaymentForm,
+      availableOptions,
     },
     ref,
   ) => {
     const stripe = useStripe();
     const elements = useElements();
-    const recaptchaRef = useRef(null);
-    const cardElementRef = useRef(null);
 
-    const [cardError, setCardError] = useState("");
+    const [errorMessage, setErrorMessage] = useState("");
     const [processingPayment, setProcessingPayment] = useState(false);
-    const [showRecaptcha, setShowRecaptcha] = useState(false);
-    const [captchaToken, setCaptchaToken] = useState("");
-    const [captchaError, setCaptchaError] = useState("");
 
     useImperativeHandle(ref, () => ({
       resetForm: () => {
-        if (elements) {
-          const cardElement = elements.getElement(CardElement);
-          if (cardElement) {
-            cardElement.clear();
-          }
-        }
-        if (recaptchaRef.current) {
-          recaptchaRef.current.reset();
-        }
-        setCaptchaToken("");
-        setCaptchaError("");
-        setShowRecaptcha(false);
-        setCardError("");
+        setErrorMessage("");
         setProcessingPayment(false);
       },
     }));
 
-    const handleCardChange = (event) => {
-      if (event.error) {
-        setCardError(event.error.message);
-      } else {
-        setCardError("");
+    const confirmOrder = async (paymentIntentId) => {
+      console.log("🔵 confirmOrder called with paymentIntentId:", paymentIntentId);
+
+      try {
+        const response = await orderAPI.confirmOrder({
+          payment_intent_id: paymentIntentId,
+        });
+
+        console.log("✅ confirmOrder response:", response);
+
+        if (response?.status === "success") {
+          console.log("Order confirmed successfully!");
+          onSuccess(response);
+        } else {
+          console.error("❌ Order confirmation failed:", response);
+          throw new Error(response?.message || "Failed to confirm order");
+        }
+      } catch (err) {
+        console.error("❌ Confirm order error:", err);
+        console.error("❌ Error details:", {
+          message: err.message,
+          status: err.response?.status,
+          data: err.response?.data,
+          stack: err.stack,
+        });
+        onError(err.message || "Failed to confirm order");
       }
     };
 
-    const handleCaptchaChange = (token) => {
-      setCaptchaToken(token || "");
-      setCaptchaError("");
-    };
+    const handleSubmit = async (event) => {
+      event.preventDefault();
 
-    const processOrder = async () => {
       if (!stripe || !elements) {
-        onError("Stripe is not initialized. Please refresh the page.");
+        setErrorMessage("Stripe is not initialized. Please refresh the page.");
         return;
       }
 
-      const cardElement = elements.getElement(CardElement);
-
       setProcessingPayment(true);
       setLoading(true);
+      setErrorMessage("");
 
       try {
-        if (cartItems.length === 0) {
-          throw new Error("Your cart is empty");
+        const { error: submitError } = await elements.submit();
+
+        if (submitError) {
+          throw new Error(submitError.message);
         }
 
-        const calculatedTotal = cartItems.reduce((sum, item) => {
-          const originalPrice = Number(item.price) || 0;
-          const discountPercent = Number(item.discount) || 0;
-          const finalPrice =
-            discountPercent > 0
-              ? originalPrice * (1 - discountPercent / 100)
-              : originalPrice;
+        const { error: confirmError, paymentIntent } =
+          await stripe.confirmPayment({
+            elements,
+            confirmParams: {
+              return_url: `${window.location.origin}/payment-complete`,
+            },
+            redirect: "if_required",
+          });
 
-          return sum + finalPrice * (Number(item.quantity) || 1);
-        }, 0);
-
-        if (calculatedTotal <= 0) {
-          throw new Error("Invalid total amount. Please check your cart items.");
+        if (confirmError) {
+          throw new Error(confirmError.message);
         }
 
-        if (
-          !formData.firstName ||
-          !formData.lastName ||
-          !formData.email ||
-          !formData.phone
-        ) {
-          throw new Error("Please fill in all required fields");
-        }
-
-        if (!validateAddress()) {
-          throw new Error("Please enter a complete address");
-        }
-
-        if (!captchaToken) {
-          setCaptchaError(
-            "Please verify the reCAPTCHA before placing your order.",
-          );
-          setShowRecaptcha(true);
-          throw new Error("Please complete the reCAPTCHA verification.");
-        }
-
-        const { token, error } = await stripe.createToken(cardElement, {
-          name: `${formData.firstName} ${formData.lastName}`,
-          email: formData.email,
-        });
-
-        if (error) throw new Error(error.message);
-        if (!token?.id) throw new Error("Failed to create payment token");
-
-        const invalidItems = cartItems.filter(
-          (item) => !item.id || !item.price || !item.quantity,
-        );
-
-        if (invalidItems.length > 0) {
-          throw new Error(
-            "Some items in your cart are invalid. Please remove them and try again.",
-          );
-        }
-
-        const fullAddress = addressInputRef.current?.value?.trim() || "";
-
-        const orderData = {
-          email: formData.email,
-          full_name: `${formData.firstName} ${formData.lastName}`.trim(),
-          ph_number: formData.phone,
-          street_no: formData.streetNo,
-          street_name: formData.streetName,
-          suburb: formData.suburb,
-          state: formData.state,
-          postal_code: formData.postalCode,
-          country: formData.country,
-          address_line1: fullAddress || formData.streetName,
-          city: formData.suburb,
-          delivery_charge: deliveryCharge,
-          delivery_type: selectedDeliveryType,
-          total_weight: totalWeight,
-          products: cartItems.map((item) => {
-            const originalPrice = Number(item.price) || 0;
-            const discountPercent = Number(item.discount) || 0;
-            const finalPrice =
-              discountPercent > 0
-                ? originalPrice * (1 - discountPercent / 100)
-                : originalPrice;
-
-            return {
-              product_id: parseInt(item.id, 10),
-              quantity: parseInt(item.quantity, 10) || 1,
-              price: finalPrice,
-              original_price: originalPrice,
-              discount_percent: discountPercent,
-              discount_name: item.discount_name || null,
-              weight: item.weight || 0,
-            };
-          }),
-          card_number: token.id,
-          exp_month: 12,
-          exp_year: new Date().getFullYear() + 1,
-          cvc: "123",
-          recaptchaToken: captchaToken,
-        };
-
-        const result = await orderAPI.placeGuestOrder(orderData);
-
-        if (result?.status === "success") {
-          if (recaptchaRef.current) {
-            recaptchaRef.current.reset();
-          }
-          if (cardElement) {
-            cardElement.clear();
-          }
-          setCaptchaToken("");
-          setCaptchaError("");
-          setShowRecaptcha(false);
-          setCardError("");
-          onSuccess(result);
+        if (paymentIntent && paymentIntent.status === "succeeded") {
+          await confirmOrder(paymentIntent.id);
         } else {
-          throw new Error(result?.message || "Failed to process order");
+          throw new Error("Payment was not successful. Please try again.");
         }
       } catch (err) {
-        if (err.response) {
-          if (err.response.status === 422) {
-            const validationErrors =
-              err.response.data.errors || err.response.data;
-            let errorMessage = "Validation failed: ";
-
-            if (typeof validationErrors === "object") {
-              const errorList = [];
-              Object.values(validationErrors).forEach((errors) => {
-                if (Array.isArray(errors)) errorList.push(...errors);
-                else if (typeof errors === "string") errorList.push(errors);
-                else errorList.push(JSON.stringify(errors));
-              });
-              errorMessage += errorList.join(", ");
-            } else if (typeof validationErrors === "string") {
-              errorMessage = validationErrors;
-            } else {
-              errorMessage = "Please check all required fields.";
-            }
-
-            onError(errorMessage);
-          } else if (err.response.data?.message) {
-            onError(err.response.data.message);
-          } else {
-            onError("Failed to place order. Please try again.");
-          }
-        } else if (err.request) {
-          onError("Network error. Please check your connection and try again.");
-        } else if (err.message) {
-          onError(err.message);
-        } else {
-          onError(
-            "Failed to place order. Please check your details and try again.",
-          );
-        }
+        console.error("Payment error:", err);
+        setErrorMessage(err.message);
+        onError(err.message);
       } finally {
         setProcessingPayment(false);
         setLoading(false);
       }
     };
 
-    const handleSubmit = async (e) => {
-      e.preventDefault();
-      if (!captchaToken) {
-        setShowRecaptcha(true);
-        setCaptchaError(
-          "Please verify the reCAPTCHA before placing your order.",
-        );
-        return;
-      }
-      await processOrder();
+    const handleBackToCart = () => {
+      setShowPaymentForm(false);
     };
-
-    const discountSummary = useMemo(() => {
-      const totalOriginal = cartItems.reduce((sum, item) => {
-        return sum + (Number(item.price) || 0) * (Number(item.quantity) || 1);
-      }, 0);
-
-      const totalDiscount = cartItems.reduce((sum, item) => {
-        const originalPrice = Number(item.price) || 0;
-        const discountPercent = Number(item.discount) || 0;
-        const quantity = Number(item.quantity) || 1;
-
-        const discountAmount =
-          discountPercent > 0
-            ? originalPrice * (discountPercent / 100) * quantity
-            : 0;
-
-        return sum + discountAmount;
-      }, 0);
-
-      return { totalOriginal, totalDiscount, finalTotal: subTotal };
-    }, [cartItems, subTotal]);
-
-    const grandTotal = subTotal + deliveryCharge;
 
     return (
       <form onSubmit={handleSubmit}>
@@ -826,152 +727,32 @@ const PaymentForm = forwardRef(
               viewport={{ once: true, amount: 0.15 }}
               transition={{ duration: 0.85, ease: "easeOut" }}
             >
-              <div className="checkout-badge">User Details</div>
+              <div className="checkout-badge">Payment Details</div>
 
               <div className="checkout-scroll-area pe-0 pe-md-2">
                 <div className="mb-3">
-                  <label className="checkout-label">First Name *</label>
-                  <input
-                    type="text"
-                    name="firstName"
-                    className="form-control checkout-input"
-                    placeholder="ex: Roja"
-                    value={formData.firstName}
-                    onChange={formData.handleChange}
-                    required
-                    disabled={loading || processingPayment}
-                  />
-                </div>
-
-                <div className="mb-3">
-                  <label className="checkout-label">Last Name *</label>
-                  <input
-                    type="text"
-                    name="lastName"
-                    className="form-control checkout-input"
-                    placeholder="ex: Kumar"
-                    value={formData.lastName}
-                    onChange={formData.handleChange}
-                    required
-                    disabled={loading || processingPayment}
-                  />
-                </div>
-
-                <div className="mb-3">
-                  <label className="checkout-label">Email *</label>
-                  <input
-                    type="email"
-                    name="email"
-                    className="form-control checkout-input"
-                    placeholder="ex: roja123@gmail.com"
-                    value={formData.email}
-                    onChange={formData.handleChange}
-                    required
-                    disabled={loading || processingPayment}
-                  />
-                </div>
-
-                <div className="mb-3">
-                  <label className="checkout-label">Phone Number *</label>
-                  <input
-                    type="tel"
-                    name="phone"
-                    className="form-control checkout-input"
-                    placeholder="ex: 12345678"
-                    value={formData.phone}
-                    onChange={formData.handleChange}
-                    required
-                    disabled={loading || processingPayment}
-                  />
-                </div>
-
-                <div className="checkout-divider"></div>
-
-                <div className="pb-2">
-                  <div className="checkout-badge mb-3">Address</div>
-
-                  {addressError && (
-                    <div className="alert alert-warning mb-3">
-                      {addressError}
-                    </div>
-                  )}
-
-                  <div className="mb-3">
-                    <label className="checkout-label">Address *</label>
-                    <input
-                      ref={addressInputRef}
-                      type="text"
-                      className="form-control checkout-input"
-                      placeholder="Enter your full address"
-                      onChange={() => {
-                        if (!autocompleteRef.current) {
-                          formData.handleAddressManualReset();
-                        }
+                  <label className="checkout-label">Card Information *</label>
+                  <div className="stripe-payment-element-wrapper">
+                    <PaymentElement
+                      options={{
+                        layout: "tabs",
+                        defaultValues: {
+                          billingDetails: {
+                            name: `${formData.firstName} ${formData.lastName}`,
+                            email: formData.email,
+                          },
+                        },
                       }}
-                      required
-                      disabled={loading || processingPayment}
-                      autoComplete="off"
                     />
                   </div>
-
-                  <input
-                    type="hidden"
-                    name="streetNo"
-                    value={formData.streetNo}
-                  />
-                  <input
-                    type="hidden"
-                    name="streetName"
-                    value={formData.streetName}
-                  />
-                  <input type="hidden" name="suburb" value={formData.suburb} />
-                  <input type="hidden" name="state" value={formData.state} />
-                  <input
-                    type="hidden"
-                    name="postalCode"
-                    value={formData.postalCode}
-                  />
-                  <input
-                    type="hidden"
-                    name="country"
-                    value={formData.country}
-                  />
                 </div>
 
-                <div className="checkout-divider"></div>
-
-                <div className="pb-2">
-                  <div className="checkout-badge mb-3">Payment Details</div>
-
-                  <div className="mb-3">
-                    <label className="checkout-label">Card Information *</label>
-                    <div className="stripe-card-element-wrapper">
-                      <CardElement
-                        ref={cardElementRef}
-                        onChange={handleCardChange}
-                        onFocus={() => setShowRecaptcha(true)}
-                      />
-                    </div>
-                    {cardError && (
-                      <div className="text-danger mt-2 small">{cardError}</div>
-                    )}
+                {errorMessage && (
+                  <div className="alert alert-danger mt-2">
+                    <i className="bi bi-exclamation-triangle-fill me-2"></i>
+                    {errorMessage}
                   </div>
-
-                  {showRecaptcha && (
-                    <div className="mb-3">
-                      <ReCAPTCHA
-                        ref={recaptchaRef}
-                        sitekey="6LfTOPoqAAAAALiP94ZP6TEYP5XiTsKjvr7dpYh9"
-                        onChange={handleCaptchaChange}
-                      />
-                      {captchaError && (
-                        <div className="text-danger mt-2 small">
-                          {captchaError}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
+                )}
               </div>
             </motion.div>
           </div>
@@ -984,189 +765,167 @@ const PaymentForm = forwardRef(
               viewport={{ once: true, amount: 0.15 }}
               transition={{ duration: 0.9, delay: 0.12, ease: "easeOut" }}
             >
-              <div className="checkout-badge">Order Details</div>
+              <div className="checkout-badge">Order Summary</div>
 
               <div className="checkout-order-items pe-0 pe-md-2">
-                {cartItems.length === 0 ? (
-                  <div className="checkout-empty-cart">Your cart is empty.</div>
-                ) : (
-                  cartItems.map((item, index) => {
-                    const originalPrice = Number(item.price) || 0;
-                    const discountPercent = Number(item.discount) || 0;
-                    const hasDiscount = discountPercent > 0;
-
-                    const discountedPrice = hasDiscount
-                      ? originalPrice * (1 - discountPercent / 100)
-                      : originalPrice;
-
-                    const savings = hasDiscount
-                      ? originalPrice - discountedPrice
-                      : 0;
-
-                    const quantity =
-                      Number(item.quantity) > 0 ? Number(item.quantity) : 1;
-
-                    return (
-                      <motion.div
-                        className={`checkout-order-item ${
-                          index !== cartItems.length - 1 ? "with-border" : ""
-                        }`}
-                        key={item.id}
-                        initial={{ opacity: 0, y: 30 }}
-                        whileInView={{ opacity: 1, y: 0 }}
-                        viewport={{ once: true, amount: 0.1 }}
-                        transition={{
-                          duration: 0.6,
-                          delay: index * 0.08,
-                          ease: "easeOut",
-                        }}
-                      >
-                        <div className="checkout-order-left">
-                          <div className="checkout-order-image">
-                            <img
-                              src={item.image}
-                              alt={item.title}
-                              className="img-fluid"
-                            />
-                          </div>
-
-                          <div className="checkout-order-info">
-                            <h6 className="checkout-product-title mb-2">
-                              {item.title}
-                              {item.weight ? ` (${item.weight}kg)` : ""}
-                            </h6>
-
-                            {hasDiscount && (
-                              <div className="discount-badge mb-2">
-                                <span className="discount-percent">
-                                  {discountPercent}% OFF
-                                </span>
-                                <span className="discount-label">
-                                  {item.discount_name || "Discount"}
-                                </span>
-                              </div>
-                            )}
-
-                            <div className="checkout-qty-box">
-                              <button
-                                type="button"
-                                onClick={() => formData.decreaseQty(item.id)}
-                                disabled={loading || processingPayment}
-                              >
-                                <FaMinus />
-                              </button>
-
-                              <span>{String(quantity).padStart(2, "0")}</span>
-
-                              <button
-                                type="button"
-                                onClick={() => formData.increaseQty(item.id)}
-                                disabled={loading || processingPayment}
-                              >
-                                <FaPlus />
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="checkout-order-right">
-                          <div className="checkout-item-price d-flex gap-2">
-                            {hasDiscount ? (
-                              <>
-                                {savings > 0 && (
-                                  <span className="savings-amount">
-                                    Save ${savings.toFixed(2)}
-                                  </span>
-                                )}
-
-                                <span className="original-price text-muted text-decoration-line-through">
-                                  ${originalPrice.toFixed(2)}
-                                </span>
-
-                                <span className="discounted-price">
-                                  ${discountedPrice.toFixed(2)}
-                                </span>
-                              </>
-                            ) : (
-                              <span className="regular-price">
-                                ${originalPrice.toFixed(2)}
-                              </span>
-                            )}
-                          </div>
-
-                          <button
-                            type="button"
-                            className="checkout-delete-btn"
-                            onClick={() => formData.removeCartItem(item.id)}
-                            disabled={loading || processingPayment}
-                          >
-                            <FaTrash />
-                          </button>
-                        </div>
-                      </motion.div>
-                    );
-                  })
-                )}
+                {cartItems.map((item) => (
+                  <div key={item.id} className="checkout-order-item">
+                    <div className="checkout-order-left">
+                      <div className="checkout-order-image">
+                        <img
+                          src={item.image}
+                          alt={item.title}
+                          className="img-fluid"
+                        />
+                      </div>
+                      <div className="checkout-order-info">
+                        <h6 className="checkout-product-title mb-2">
+                          {item.title}
+                        </h6>
+                        <div>Quantity: {item.quantity}</div>
+                      </div>
+                    </div>
+                    <div className="checkout-order-right">
+                      <div className="checkout-item-price">
+                        $
+                        {((item.sell_price || item.price) * item.quantity).toFixed(
+                          2,
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
 
-              <div className="delivery-options-section">
-                <div className="delivery-weight-info mb-3">
-                  <span>
-                    Total Package Weight:{" "}
-                    <strong>{totalWeight.toFixed(2)} kg</strong>
-                  </span>
+              {cartItems.length > 0 && (
+                <div className="delivery-options-section px-3">
+                  <div className="checkout-badge mb-3">Delivery Options</div>
+                  <div className="delivery-weight-info mb-3">
+                    <span>
+                      Total Package Weight:{" "}
+                      <strong>
+                        {totalWeight >= 1000
+                          ? `${(totalWeight / 1000).toFixed(2)} kg`
+                          : `${totalWeight} g`}
+                      </strong>
+                    </span>
+                  </div>
+                  <div className="delivery-options">
+                    {availableOptions?.standard && (
+                      <label className="delivery-option d-flex align-items-start gap-3 mb-3 p-2 border rounded">
+                        <input
+                          type="radio"
+                          name="deliveryType"
+                          value="standard"
+                          checked={selectedDeliveryType === "standard"}
+                          onChange={(e) => onDeliveryTypeChange(e.target.value)}
+                          disabled={loading}
+                          className="mt-1"
+                        />
+                        <div className="delivery-option-content flex-grow-1">
+                          <div className="d-flex justify-content-between">
+                            <span className="delivery-title fw-bold">
+                              Standard Delivery
+                            </span>
+                            <span className="delivery-price fw-bold">
+                              $
+                              {parseFloat(
+                                availableOptions.standard.delivery_price,
+                              ).toFixed(2)}
+                            </span>
+                          </div>
+                          <small className="delivery-description text-muted d-block">
+                            {availableOptions.standard.deleivery_description ||
+                              "5-8 business days"}
+                          </small>
+                        </div>
+                      </label>
+                    )}
+
+                    {availableOptions?.express && (
+                      <label className="delivery-option d-flex align-items-start gap-3 mb-3 p-2 border rounded">
+                        <input
+                          type="radio"
+                          name="deliveryType"
+                          value="express"
+                          checked={selectedDeliveryType === "express"}
+                          onChange={(e) => onDeliveryTypeChange(e.target.value)}
+                          disabled={loading}
+                          className="mt-1"
+                        />
+                        <div className="delivery-option-content flex-grow-1">
+                          <div className="d-flex justify-content-between">
+                            <span className="delivery-title fw-bold">
+                              Express Delivery
+                            </span>
+                            <span className="delivery-price fw-bold">
+                              $
+                              {parseFloat(
+                                availableOptions.express.delivery_price,
+                              ).toFixed(2)}
+                            </span>
+                          </div>
+                          <small className="delivery-description text-muted d-block">
+                            {availableOptions.express.deleivery_description ||
+                              "1-2 business days"}
+                          </small>
+                        </div>
+                      </label>
+                    )}
+                  </div>
                 </div>
-              </div>
+              )}
 
-              <div className="checkout-footer">
-                <div className="checkout-subtotal">
+              <div className="checkout-footer px-3">
+                <div className="checkout-subtotal d-flex justify-content-between mb-2">
                   <span>SUB TOTAL ({totalItems} items):</span>
                   <strong>${subTotal.toFixed(2)}</strong>
                 </div>
 
-                <div className="checkout-delivery-charge">
-                  <span>DELIVERY CHARGE:</span>
-                  <strong>${deliveryCharge.toFixed(2)}</strong>
+                {cartItems.length > 0 && (
+                  <div className="checkout-delivery-charge d-flex justify-content-between mb-2">
+                    <span>DELIVERY CHARGE:</span>
+                    <strong>${deliveryCharge.toFixed(2)}</strong>
+                  </div>
+                )}
+
+                <div className="checkout-grand-total d-flex justify-content-between mb-3 pt-2 border-top">
+                  <span className="fw-bold">TOTAL:</span>
+                  <strong className="fs-5">
+                    ${cartItems.length > 0 ? grandTotal.toFixed(2) : "0.00"}
+                  </strong>
                 </div>
 
-                <div className="checkout-grand-total">
-                  <span>TOTAL:</span>
-                  <strong>${(subTotal + deliveryCharge).toFixed(2)}</strong>
-                </div>
-
-                <div className="checkout-btn-group">
+                <div className="d-flex gap-2 mt-2">
+                  <button
+                    type="button"
+                    className="btn btn-outline-secondary flex-grow-1 py-2 rounded-pill"
+                    onClick={handleBackToCart}
+                    disabled={processingPayment}
+                  >
+                    Back
+                  </button>
                   <button
                     type="submit"
-                    className="checkout-btn primary-btn"
-                    disabled={
-                      loading ||
-                      processingPayment ||
-                      cartItems.length === 0 ||
-                      !stripe
-                    }
+                    className="btn btn-warning text-white flex-grow-1 py-2 rounded-pill"
+                    disabled={!stripe || processingPayment}
                   >
                     {processingPayment ? (
                       <>
-                        <span
-                          className="spinner-border spinner-border-sm me-2"
-                          role="status"
-                          aria-hidden="true"
-                        ></span>
-                        Processing Payment...
-                      </>
-                    ) : loading ? (
-                      <>
-                        <span
-                          className="spinner-border spinner-border-sm me-2"
-                          role="status"
-                          aria-hidden="true"
-                        ></span>
-                        Placing Order...
+                        <span className="spinner-border spinner-border-sm me-2"></span>
+                        Processing...
                       </>
                     ) : (
-                      `Place Order • $${(subTotal + deliveryCharge).toFixed(2)}`
+                      `Pay $${cartItems.length > 0 ? grandTotal.toFixed(2) : "0.00"}`
                     )}
                   </button>
+                </div>
+
+                <div className="text-center mt-3">
+                  <small className="text-muted">
+                    <i className="bi bi-shield-lock me-1"></i>
+                    Secured by Stripe • 256-bit SSL encryption
+                  </small>
                 </div>
               </div>
             </motion.div>
@@ -1181,6 +940,8 @@ const Checkout = () => {
   const addressInputRef = useRef(null);
   const autocompleteRef = useRef(null);
   const paymentFormResetRef = useRef(null);
+  const googleMapsScriptRef = useRef(null);
+  const checkoutRecaptchaRef = useRef(null);
 
   const [formData, setFormData] = useState({
     firstName: "",
@@ -1203,29 +964,264 @@ const Checkout = () => {
   const [orderResult, setOrderResult] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [addressError, setAddressError] = useState("");
+  const [clientSecret, setClientSecret] = useState(null);
+  const [showPaymentForm, setShowPaymentForm] = useState(false);
   const [selectedDeliveryType, setSelectedDeliveryType] = useState("standard");
-  const [deliveryOptions, setDeliveryOptions] = useState({});
-  const [deliveryOptionsLoading, setDeliveryOptionsLoading] = useState(false);
+  const [deliveryOptions, setDeliveryOptions] = useState(null);
+  const [deliveryOptionsLoading, setDeliveryOptionsLoading] = useState(true);
+  const [googleMapsLoaded, setGoogleMapsLoaded] = useState(false);
+
+  const [captchaToken, setCaptchaToken] = useState("");
+  const [captchaError, setCaptchaError] = useState("");
+
+  const handleCheckoutCaptchaChange = (token) => {
+    setCaptchaToken(token || "");
+    setCaptchaError("");
+  };
+
+  const resetCheckoutCaptcha = () => {
+    setCaptchaToken("");
+    setCaptchaError("");
+    if (checkoutRecaptchaRef.current) {
+      checkoutRecaptchaRef.current.reset();
+    }
+  };
 
   const totalWeight = useMemo(() => {
-    return cartItems.reduce((sum, item) => {
-      const itemWeight = Number(item.weight) || 0;
-      const qty = Number(item.quantity) || 1;
-      return sum + itemWeight * qty;
+    const weight = cartItems.reduce((sum, item) => {
+      const itemWeightGrams = item.weight || 0;
+      return sum + itemWeightGrams * item.quantity;
     }, 0);
+    console.log("Calculated total weight:", weight, "g");
+    return weight;
   }, [cartItems]);
 
+  const availableOptions = useMemo(() => {
+    const options = getAvailableDeliveryOptions(totalWeight, deliveryOptions);
+    console.log("Available options for weight", totalWeight, ":", options);
+    return options;
+  }, [totalWeight, deliveryOptions]);
+
   const deliveryCharge = useMemo(() => {
-    return calculateDeliveryCharge(
+    if (!deliveryOptions || deliveryOptions.length === 0) return 0;
+    if (totalWeight <= 0) return 0;
+
+    let effectiveType = selectedDeliveryType;
+    const hasStandard = availableOptions?.standard !== null;
+    const hasExpress = availableOptions?.express !== null;
+
+    if (hasStandard && !hasExpress) {
+      effectiveType = "standard";
+    } else if (!hasStandard && hasExpress) {
+      effectiveType = "express";
+    }
+
+    const charge = calculateDeliveryChargeFromAPI(
       totalWeight,
-      selectedDeliveryType,
+      effectiveType,
       deliveryOptions,
     );
-  }, [totalWeight, selectedDeliveryType, deliveryOptions]);
+    console.log(
+      `Delivery charge for ${effectiveType} with weight ${totalWeight}g: $${charge}`,
+    );
+    return charge;
+  }, [totalWeight, selectedDeliveryType, deliveryOptions, availableOptions]);
+
+  useEffect(() => {
+    const hasStandard = availableOptions?.standard !== null;
+    const hasExpress = availableOptions?.express !== null;
+
+    if (hasStandard && !hasExpress) {
+      setSelectedDeliveryType("standard");
+    } else if (!hasStandard && hasExpress) {
+      setSelectedDeliveryType("express");
+    }
+  }, [availableOptions]);
+
+  useEffect(() => {
+    const fetchDeliveryOptions = async () => {
+      try {
+        setDeliveryOptionsLoading(true);
+        const response = await deliveryAPI.getDeliveryOptions();
+
+        console.log("Delivery options API response:", response);
+
+        if (response?.status === "success" && response?.data) {
+          setDeliveryOptions(response.data);
+          console.log("Delivery options loaded:", response.data);
+        } else {
+          console.error("Failed to load delivery options:", response);
+          setError("Unable to load delivery options. Please refresh the page.");
+        }
+      } catch (err) {
+        console.error("Error fetching delivery options:", err);
+        setError("Failed to load delivery options. Please check your connection.");
+      } finally {
+        setDeliveryOptionsLoading(false);
+      }
+    };
+
+    fetchDeliveryOptions();
+  }, []);
+
+  useEffect(() => {
+    console.log("Loading Google Maps...");
+
+    if (window.google && window.google.maps && window.google.maps.places) {
+      console.log("Google Maps already loaded");
+      setGoogleMapsLoaded(true);
+      return;
+    }
+
+    const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+
+    if (!apiKey) {
+      console.error("Google Maps API key is missing!");
+      setAddressError(
+        "Address autocomplete is unavailable. Please enter your address manually.",
+      );
+      return;
+    }
+
+    if (googleMapsScriptRef.current) {
+      googleMapsScriptRef.current.remove();
+    }
+
+    window.initGoogleMaps = () => {
+      console.log("Google Maps callback executed");
+      if (window.google && window.google.maps && window.google.maps.places) {
+        console.log("Google Maps loaded successfully");
+        setGoogleMapsLoaded(true);
+      } else {
+        console.error("Google Maps loaded but Places API not available");
+        setAddressError(
+          "Address service partially loaded. Please enter address manually.",
+        );
+      }
+      delete window.initGoogleMaps;
+    };
+
+    const script = document.createElement("script");
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places&callback=initGoogleMaps&loading=async`;
+    script.async = true;
+    script.defer = true;
+    script.onerror = (error) => {
+      console.error("Failed to load Google Maps:", error);
+      setAddressError("Unable to load address service. Please enter address manually.");
+      delete window.initGoogleMaps;
+    };
+
+    document.head.appendChild(script);
+    googleMapsScriptRef.current = script;
+
+    return () => {
+      if (googleMapsScriptRef.current) {
+        googleMapsScriptRef.current.remove();
+      }
+      if (window.initGoogleMaps) {
+        delete window.initGoogleMaps;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    let retryCount = 0;
+    const maxRetries = 10;
+    let retryInterval;
+
+    const initAutocomplete = () => {
+      console.log(`Attempt ${retryCount + 1} to initialize autocomplete...`);
+
+      if (!googleMapsLoaded) {
+        console.log("Google Maps not ready yet");
+        return false;
+      }
+
+      if (!addressInputRef.current) {
+        console.log("Address input ref not available");
+        return false;
+      }
+
+      if (!window.google || !window.google.maps || !window.google.maps.places) {
+        console.error("Google Maps Places API not available");
+        setAddressError("Address service unavailable. Please enter address manually.");
+        return false;
+      }
+
+      if (autocompleteRef.current) {
+        console.log("Autocomplete already initialized");
+        return true;
+      }
+
+      try {
+        console.log("Creating Autocomplete instance...");
+
+        const autocompleteOptions = {
+          types: ["address"],
+          fields: ["address_components", "formatted_address", "geometry"],
+          componentRestrictions: { country: "au" },
+        };
+
+        const autocomplete = new window.google.maps.places.Autocomplete(
+          addressInputRef.current,
+          autocompleteOptions,
+        );
+
+        autocomplete.addListener("place_changed", () => {
+          const place = autocomplete.getPlace();
+          console.log("Place selected:", place.formatted_address);
+
+          if (place && place.address_components) {
+            handlePlaceSelect(place);
+          } else {
+            console.warn("No place details available");
+            setAddressError("Please select an address from the dropdown");
+          }
+        });
+
+        autocompleteRef.current = autocomplete;
+        setAddressError("");
+        console.log("Autocomplete initialized successfully!");
+        return true;
+      } catch (err) {
+        console.error("Error creating Autocomplete:", err);
+        setAddressError(
+          "Failed to initialize address autocomplete. Please enter address manually.",
+        );
+        return false;
+      }
+    };
+
+    const tryInit = () => {
+      if (initAutocomplete()) {
+        if (retryInterval) clearInterval(retryInterval);
+      } else if (retryCount < maxRetries) {
+        retryCount++;
+      } else {
+        console.error("Max retries reached, autocomplete not initialized");
+        setAddressError(
+          "Address autocomplete not available. Please enter your address manually.",
+        );
+        if (retryInterval) clearInterval(retryInterval);
+      }
+    };
+
+    const startDelay = setTimeout(() => {
+      tryInit();
+      retryInterval = setInterval(tryInit, 1000);
+    }, 500);
+
+    return () => {
+      clearTimeout(startDelay);
+      if (retryInterval) clearInterval(retryInterval);
+      if (autocompleteRef.current && window.google?.maps?.event) {
+        window.google.maps.event.clearInstanceListeners(autocompleteRef.current);
+      }
+    };
+  }, [googleMapsLoaded]);
 
   useEffect(() => {
     loadCartFromStorage();
-    fetchDeliveryOptionsFromAPI();
 
     const handleCartUpdated = () => {
       loadCartFromStorage();
@@ -1235,89 +1231,6 @@ const Checkout = () => {
 
     return () => {
       window.removeEventListener("cartUpdated", handleCartUpdated);
-    };
-  }, []);
-
-  const fetchDeliveryOptionsFromAPI = async () => {
-    try {
-      setDeliveryOptionsLoading(true);
-      const options = await fetchDeliveryOptions();
-      setDeliveryOptions(options || {});
-
-      const availableTypes = Object.keys(options || {});
-      if (availableTypes.length > 0) {
-        if (!availableTypes.includes(selectedDeliveryType)) {
-          setSelectedDeliveryType(availableTypes[0]);
-        }
-      }
-    } catch (err) {
-      console.error("Failed to load delivery options:", err);
-    } finally {
-      setDeliveryOptionsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    let isMounted = true;
-
-    const initGoogleAutocomplete = async () => {
-      try {
-        if (!addressInputRef.current) return;
-        if (autocompleteRef.current) return;
-
-        setOptions({
-          key: import.meta.env.VITE_GOOGLE_MAPS_API_KEY,
-          version: "weekly",
-        });
-
-        const placesLibrary = await importLibrary("places");
-        if (!isMounted) return;
-
-        const AutocompleteClass =
-          placesLibrary.Autocomplete ||
-          window.google?.maps?.places?.Autocomplete;
-
-        if (!AutocompleteClass) {
-          throw new Error("Autocomplete class not found");
-        }
-
-        autocompleteRef.current = new AutocompleteClass(
-          addressInputRef.current,
-          {
-            types: ["address"],
-            fields: [
-              "address_components",
-              "formatted_address",
-              "geometry",
-              "name",
-            ],
-            componentRestrictions: { country: "au" },
-          },
-        );
-
-        autocompleteRef.current.addListener("place_changed", () => {
-          const place = autocompleteRef.current.getPlace();
-          handlePlaceSelect(place);
-        });
-
-        setAddressError("");
-      } catch (err) {
-        console.error("[Autocomplete Debug] Google autocomplete failed:", err);
-        setAddressError(
-          "Address autocomplete is unavailable. Please enter your address manually.",
-        );
-      }
-    };
-
-    initGoogleAutocomplete();
-
-    return () => {
-      isMounted = false;
-      if (autocompleteRef.current && window.google?.maps?.event) {
-        window.google.maps.event.clearInstanceListeners(
-          autocompleteRef.current,
-        );
-      }
     };
   }, []);
 
@@ -1347,50 +1260,32 @@ const Checkout = () => {
     const storedCart = JSON.parse(localStorage.getItem("adadaCart")) || [];
 
     const processedCart = storedCart.map((item) => {
-      let discountPercent = 0;
-      let discountName = null;
+      let weightKg = 0;
+      let weightGrams = 0;
 
-      if (
-        item.discount &&
-        typeof item.discount === "object" &&
-        item.discount.discount_percentage
-      ) {
-        discountPercent = parseFloat(item.discount.discount_percentage);
-        discountName = item.discount.discount_name;
-      } else if (item.discount && typeof item.discount === "number") {
-        discountPercent = item.discount;
-        discountName = item.discount_name;
-      }
-
-      const originalPrice = parseFloat(item.sell_price || item.price || 0);
-      const finalPrice =
-        discountPercent > 0
-          ? originalPrice * (1 - discountPercent / 100)
-          : originalPrice;
-
-      let itemWeightKg = 0.25;
-
-      if (item.dimensions && item.dimensions.weight !== undefined && item.dimensions.weight !== null) {
-        itemWeightKg = parseFloat(item.dimensions.weight);
-      } else if (item.weight !== undefined && item.weight !== null) {
-        itemWeightKg = parseFloat(item.weight);
-      }
-
-      if (Number.isNaN(itemWeightKg) || itemWeightKg < 0) {
-        itemWeightKg = 0.25;
+      if (item.dimensions && item.dimensions.weight) {
+        weightKg = parseFloat(item.dimensions.weight);
+        weightGrams = weightKg * 1000;
       }
 
       return {
         id: item.id,
         title: item.title || item.product_name,
-        price: originalPrice,
-        discount: discountPercent,
-        discount_name: discountName,
-        finalPrice,
+        price: typeof item.price === "string" ? parseFloat(item.price) : item.price,
+        sell_price:
+          typeof item.sell_price === "string"
+            ? parseFloat(item.sell_price)
+            : item.sell_price,
+        quantity:
+          typeof item.quantity === "string"
+            ? parseInt(item.quantity, 10)
+            : item.quantity || 1,
         image: item.image,
-        description: item.description || "",
-        quantity: parseInt(item.quantity, 10) || 1,
-        weight: itemWeightKg,
+        weight: weightGrams,
+        weightKg: weightKg,
+        dimensions: item.dimensions,
+        sku: item.sku,
+        description: item.description,
       };
     });
 
@@ -1405,13 +1300,8 @@ const Checkout = () => {
 
   const subTotal = useMemo(() => {
     return cartItems.reduce((sum, item) => {
-      const originalPrice = parseFloat(item.price || 0);
-      const discountPercent = item.discount ? parseFloat(item.discount) : 0;
-      const finalPrice =
-        discountPercent > 0
-          ? originalPrice * (1 - discountPercent / 100)
-          : originalPrice;
-      return sum + finalPrice * item.quantity;
+      const itemPrice = item.sell_price || item.price;
+      return sum + itemPrice * item.quantity;
     }, 0);
   }, [cartItems]);
 
@@ -1419,20 +1309,13 @@ const Checkout = () => {
     return cartItems.reduce((sum, item) => sum + item.quantity, 0);
   }, [cartItems]);
 
+  const grandTotal = useMemo(() => {
+    return subTotal + deliveryCharge;
+  }, [subTotal, deliveryCharge]);
+
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
-  };
-
-  const handleAddressManualReset = () => {
-    setFormData((prev) => ({
-      ...prev,
-      streetNo: "",
-      streetName: "",
-      suburb: "",
-      state: "",
-      postalCode: "",
-    }));
   };
 
   const handlePlaceSelect = (place) => {
@@ -1471,6 +1354,10 @@ const Checkout = () => {
         postalCode,
       }));
 
+      if (addressInputRef.current) {
+        addressInputRef.current.value = place.formatted_address || "";
+      }
+
       setAddressError("");
     } catch (err) {
       console.error("Error in handlePlaceSelect:", err);
@@ -1499,6 +1386,7 @@ const Checkout = () => {
           const stateAndPostcode = addressParts[addressParts.length - 1]
             ?.trim()
             ?.split(/\s+/);
+
           const derivedState = stateAndPostcode?.[0] || "";
           const derivedPostcode = stateAndPostcode?.[1] || "";
 
@@ -1548,6 +1436,76 @@ const Checkout = () => {
     setSelectedDeliveryType(type);
   };
 
+  const initializePayment = async () => {
+    if (!validateAddress()) {
+      setError("Please enter a complete address");
+      return;
+    }
+
+    if (!captchaToken) {
+      setCaptchaError("Please verify the reCAPTCHA before proceeding to payment.");
+      return;
+    }
+
+    if (
+      !formData.firstName ||
+      !formData.lastName ||
+      !formData.email ||
+      !formData.phone
+    ) {
+      setError("Please fill in all required fields");
+      return;
+    }
+
+    if (cartItems.length === 0) {
+      setError("Your cart is empty");
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const fullAddress = addressInputRef.current?.value?.trim() || "";
+
+      const payload = {
+        full_name: `${formData.firstName} ${formData.lastName}`.trim(),
+        email: formData.email,
+        ph_number: formData.phone,
+        address_line1: fullAddress || formData.streetName,
+        address_line2: formData.streetNo,
+        city: formData.suburb,
+        state: formData.state,
+        postal_code: formData.postalCode,
+        country: formData.country,
+        delivery_charge: deliveryCharge,
+        delivery_type: selectedDeliveryType,
+        total_weight: totalWeight,
+        captcha_token: captchaToken,
+        products: cartItems.map((item) => ({
+          product_id: parseInt(item.id, 10),
+          quantity: parseInt(item.quantity, 10),
+          price: parseFloat(item.sell_price || item.price),
+          weight: item.weight,
+        })),
+      };
+
+      const response = await orderAPI.createPaymentIntent(payload);
+
+      if (response?.status === "success" && response.data?.client_secret) {
+        setClientSecret(response.data.client_secret);
+        setShowPaymentForm(true);
+      } else {
+        throw new Error(response?.message || "Failed to initialize payment");
+      }
+    } catch (err) {
+      console.error("Payment initialization error:", err);
+      setError(err.message || "Failed to initialize payment");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleOrderSuccess = (result) => {
     setOrderResult(result);
     localStorage.removeItem("adadaCart");
@@ -1572,9 +1530,14 @@ const Checkout = () => {
       addressInputRef.current.value = "";
     }
 
+    resetCheckoutCaptcha();
+
     if (paymentFormResetRef.current) {
       paymentFormResetRef.current.resetForm();
     }
+
+    setShowPaymentForm(false);
+    setClientSecret(null);
 
     setTimeout(() => {
       setShowModal(true);
@@ -1592,6 +1555,36 @@ const Checkout = () => {
   const handleCloseModal = () => {
     setShowModal(false);
   };
+
+  const formatWeight = (weightGrams) => {
+    if (weightGrams >= 1000) {
+      return `${(weightGrams / 1000).toFixed(2)} kg`;
+    }
+    return `${weightGrams} g`;
+  };
+
+  const hasZeroWeightItems = useMemo(() => {
+    return cartItems.some((item) => item.weight === 0);
+  }, [cartItems]);
+
+  if (deliveryOptionsLoading) {
+    return (
+      <>
+        <Banner
+          title="CHECKOUT"
+          subtitle="Tea first. Everything else later."
+          breadcrumb="HOME > CHECKOUT"
+          bgImage={bannerBg}
+        />
+        <div className="container py-5 text-center">
+          <div className="spinner-border text-primary" role="status">
+            <span className="visually-hidden">Loading delivery options...</span>
+          </div>
+          <p className="mt-3">Loading checkout...</p>
+        </div>
+      </>
+    );
+  }
 
   return (
     <>
@@ -1657,34 +1650,391 @@ const Checkout = () => {
             </div>
           )}
 
-          <Elements stripe={stripePromise}>
-            <PaymentForm
-              ref={paymentFormResetRef}
-              formData={{
-                ...formData,
-                handleChange,
-                decreaseQty,
-                increaseQty,
-                removeCartItem,
-                handleAddressManualReset,
-              }}
-              cartItems={cartItems}
-              subTotal={subTotal}
-              totalItems={totalItems}
-              totalWeight={totalWeight}
-              deliveryCharge={deliveryCharge}
-              selectedDeliveryType={selectedDeliveryType}
-              onDeliveryTypeChange={handleDeliveryTypeChange}
-              onSuccess={handleOrderSuccess}
-              onError={handleOrderError}
-              loading={loading}
-              setLoading={setLoading}
-              addressInputRef={addressInputRef}
-              autocompleteRef={autocompleteRef}
-              addressError={addressError}
-              validateAddress={validateAddress}
-            />
-          </Elements>
+          {hasZeroWeightItems && (
+            <div
+              className="alert alert-warning alert-dismissible fade show mb-4"
+              role="alert"
+            >
+              <strong>Warning:</strong> Some items in your cart have no weight
+              specified. Delivery charges may not be accurate.
+              <button type="button" className="btn-close" onClick={() => {}}></button>
+            </div>
+          )}
+
+          {!showPaymentForm ? (
+            <div className="row g-4 align-items-stretch">
+              <div className="col-12 col-lg-6 d-flex">
+                <motion.div
+                  className="checkout-card w-100 d-flex flex-column"
+                  initial={{ opacity: 0, y: 60 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true, amount: 0.15 }}
+                  transition={{ duration: 0.85, ease: "easeOut" }}
+                >
+                  <div className="checkout-badge">User Details</div>
+
+                  <div className="checkout-scroll-area pe-0 pe-md-2">
+                    <div className="mb-3">
+                      <label className="checkout-label">First Name *</label>
+                      <input
+                        type="text"
+                        name="firstName"
+                        className="form-control checkout-input"
+                        placeholder="ex: Roja"
+                        value={formData.firstName}
+                        onChange={handleChange}
+                        required
+                        disabled={loading}
+                      />
+                    </div>
+
+                    <div className="mb-3">
+                      <label className="checkout-label">Last Name *</label>
+                      <input
+                        type="text"
+                        name="lastName"
+                        className="form-control checkout-input"
+                        placeholder="ex: Kumar"
+                        value={formData.lastName}
+                        onChange={handleChange}
+                        required
+                        disabled={loading}
+                      />
+                    </div>
+
+                    <div className="mb-3">
+                      <label className="checkout-label">Email *</label>
+                      <input
+                        type="email"
+                        name="email"
+                        className="form-control checkout-input"
+                        placeholder="ex: roja123@gmail.com"
+                        value={formData.email}
+                        onChange={handleChange}
+                        required
+                        disabled={loading}
+                      />
+                    </div>
+
+                    <div className="mb-3">
+                      <label className="checkout-label">Phone Number *</label>
+                      <input
+                        type="tel"
+                        name="phone"
+                        className="form-control checkout-input"
+                        placeholder="ex: 12345678"
+                        value={formData.phone}
+                        onChange={handleChange}
+                        required
+                        disabled={loading}
+                      />
+                    </div>
+
+                    <div className="checkout-divider"></div>
+
+                    <div className="pb-2">
+                      <div className="checkout-badge mb-3">Address</div>
+
+                      {addressError && (
+                        <div className="alert alert-warning mb-3">
+                          {addressError}
+                        </div>
+                      )}
+
+                      <div className="mb-3">
+                        <label className="checkout-label">Address *</label>
+                        <input
+                          ref={addressInputRef}
+                          type="text"
+                          className="form-control checkout-input"
+                          placeholder="Start typing your address..."
+                          autoComplete="off"
+                          disabled={loading}
+                        />
+                        <small className="text-muted">
+                          Enter your street address, city, or postcode
+                        </small>
+                      </div>
+
+                      <div className="mb-3">
+                        <ReCAPTCHA
+                          ref={checkoutRecaptchaRef}
+                          sitekey="6LfTOPoqAAAAALiP94ZP6TEYP5XiTsKjvr7dpYh9"
+                          onChange={handleCheckoutCaptchaChange}
+                        />
+                        {captchaError && (
+                          <div className="text-danger mt-2 small">
+                            {captchaError}
+                          </div>
+                        )}
+                      </div>
+
+                      <input type="hidden" name="streetNo" value={formData.streetNo} />
+                      <input
+                        type="hidden"
+                        name="streetName"
+                        value={formData.streetName}
+                      />
+                      <input type="hidden" name="suburb" value={formData.suburb} />
+                      <input type="hidden" name="state" value={formData.state} />
+                      <input
+                        type="hidden"
+                        name="postalCode"
+                        value={formData.postalCode}
+                      />
+                      <input type="hidden" name="country" value={formData.country} />
+                    </div>
+                  </div>
+                </motion.div>
+              </div>
+
+              <div className="col-12 col-lg-6 d-flex">
+                <motion.div
+                  className="checkout-card w-100 d-flex flex-column"
+                  initial={{ opacity: 0, y: 60 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true, amount: 0.15 }}
+                  transition={{ duration: 0.9, delay: 0.12, ease: "easeOut" }}
+                >
+                  <div className="checkout-badge">Order Details</div>
+
+                  <div className="checkout-order-items pe-0 pe-md-2">
+                    {cartItems.length === 0 ? (
+                      <div className="checkout-empty-cart">Your cart is empty.</div>
+                    ) : (
+                      cartItems.map((item, index) => (
+                        <motion.div
+                          className={`checkout-order-item ${
+                            index !== cartItems.length - 1 ? "with-border" : ""
+                          }`}
+                          key={item.id}
+                          initial={{ opacity: 0, y: 30 }}
+                          whileInView={{ opacity: 1, y: 0 }}
+                          viewport={{ once: true, amount: 0.1 }}
+                          transition={{
+                            duration: 0.6,
+                            delay: index * 0.08,
+                            ease: "easeOut",
+                          }}
+                        >
+                          <div className="checkout-order-left">
+                            <div className="checkout-order-image">
+                              <img
+                                src={item.image}
+                                alt={item.title}
+                                className="img-fluid"
+                              />
+                            </div>
+
+                            <div className="checkout-order-info">
+                              <h6 className="checkout-product-title mb-2">
+                                {item.title}
+                              </h6>
+
+                              <div className="checkout-qty-box">
+                                <button
+                                  type="button"
+                                  onClick={() => decreaseQty(item.id)}
+                                  disabled={loading}
+                                >
+                                  <FaMinus />
+                                </button>
+                                <span>{String(item.quantity).padStart(2, "0")}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => increaseQty(item.id)}
+                                  disabled={loading}
+                                >
+                                  <FaPlus />
+                                </button>
+                              </div>
+                              {item.weight > 0 && (
+                                <small className="text-muted">
+                                  Weight: {formatWeight(item.weight)}
+                                </small>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="checkout-order-right">
+                            <div className="checkout-item-price">
+                              $
+                              {(
+                                (item.sell_price || item.price) * item.quantity
+                              ).toFixed(2)}
+                            </div>
+
+                            <button
+                              type="button"
+                              className="checkout-delete-btn"
+                              onClick={() => removeCartItem(item.id)}
+                              disabled={loading}
+                            >
+                              <FaTrash />
+                            </button>
+                          </div>
+                        </motion.div>
+                      ))
+                    )}
+                  </div>
+
+                  {cartItems.length > 0 && (
+                    <div className="delivery-options-section px-3">
+                      <div className="checkout-badge mb-3">Delivery Options</div>
+                      <div className="delivery-weight-info mb-3">
+                        <span>
+                          Total Package Weight:{" "}
+                          <strong>{formatWeight(totalWeight)}</strong>
+                        </span>
+                      </div>
+                      <div className="delivery-options">
+                        {availableOptions?.standard && (
+                          <label className="delivery-option d-flex align-items-start gap-3 mb-3 p-2 border rounded">
+                            <input
+                              type="radio"
+                              name="deliveryType"
+                              value="standard"
+                              checked={selectedDeliveryType === "standard"}
+                              onChange={(e) =>
+                                handleDeliveryTypeChange(e.target.value)
+                              }
+                              disabled={loading}
+                              className="mt-1"
+                            />
+                            <div className="delivery-option-content flex-grow-1">
+                              <div className="d-flex justify-content-between">
+                                <span className="delivery-title fw-bold">
+                                  Standard Delivery
+                                </span>
+                                <span className="delivery-price fw-bold">
+                                  $
+                                  {parseFloat(
+                                    availableOptions.standard.delivery_price,
+                                  ).toFixed(2)}
+                                </span>
+                              </div>
+                              <small className="delivery-description text-muted d-block">
+                                {availableOptions.standard.deleivery_description ||
+                                  "5-8 business days"}
+                              </small>
+                            </div>
+                          </label>
+                        )}
+
+                        {availableOptions?.express && (
+                          <label className="delivery-option d-flex align-items-start gap-3 mb-3 p-2 border rounded">
+                            <input
+                              type="radio"
+                              name="deliveryType"
+                              value="express"
+                              checked={selectedDeliveryType === "express"}
+                              onChange={(e) =>
+                                handleDeliveryTypeChange(e.target.value)
+                              }
+                              disabled={loading}
+                              className="mt-1"
+                            />
+                            <div className="delivery-option-content flex-grow-1">
+                              <div className="d-flex justify-content-between">
+                                <span className="delivery-title fw-bold">
+                                  Express Delivery
+                                </span>
+                                <span className="delivery-price fw-bold">
+                                  $
+                                  {parseFloat(
+                                    availableOptions.express.delivery_price,
+                                  ).toFixed(2)}
+                                </span>
+                              </div>
+                              <small className="delivery-description text-muted d-block">
+                                {availableOptions.express.deleivery_description ||
+                                  "1-2 business days"}
+                              </small>
+                            </div>
+                          </label>
+                        )}
+
+                        {!availableOptions?.standard && !availableOptions?.express && (
+                          <div className="alert alert-danger">
+                            <strong>Error:</strong> No delivery options available for
+                            this weight ({formatWeight(totalWeight)}). Please contact
+                            support.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="checkout-footer px-3">
+                    <div className="checkout-subtotal d-flex justify-content-between mb-2">
+                      <span>SUB TOTAL ({totalItems} items):</span>
+                      <strong>${subTotal.toFixed(2)}</strong>
+                    </div>
+
+                    {cartItems.length > 0 && (
+                      <div className="checkout-delivery-charge d-flex justify-content-between mb-2">
+                        <span>DELIVERY CHARGE:</span>
+                        <strong>${deliveryCharge.toFixed(2)}</strong>
+                      </div>
+                    )}
+
+                    <div className="checkout-grand-total d-flex justify-content-between mb-3 pt-2 border-top">
+                      <span className="fw-bold">TOTAL:</span>
+                      <strong className="fs-5">
+                        ${cartItems.length > 0 ? grandTotal.toFixed(2) : "0.00"}
+                      </strong>
+                    </div>
+
+                    <div className="checkout-btn-group">
+                      <button
+                        type="button"
+                        className="checkout-btn primary-btn w-100 py-2 rounded-pill"
+                        onClick={initializePayment}
+                        disabled={
+                          loading ||
+                          cartItems.length === 0 ||
+                          (!availableOptions?.standard && !availableOptions?.express)
+                        }
+                      >
+                        {loading ? (
+                          <>
+                            <span className="spinner-border spinner-border-sm me-2"></span>
+                            Initializing Payment...
+                          </>
+                        ) : (
+                          `Proceed to Payment • $${
+                            cartItems.length > 0 ? grandTotal.toFixed(2) : "0.00"
+                          }`
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              </div>
+            </div>
+          ) : (
+            <Elements stripe={stripePromise} options={{ clientSecret }}>
+              <PaymentFormComponent
+                ref={paymentFormResetRef}
+                formData={formData}
+                cartItems={cartItems}
+                subTotal={subTotal}
+                totalItems={totalItems}
+                totalWeight={totalWeight}
+                deliveryCharge={deliveryCharge}
+                grandTotal={grandTotal}
+                selectedDeliveryType={selectedDeliveryType}
+                onDeliveryTypeChange={handleDeliveryTypeChange}
+                onSuccess={handleOrderSuccess}
+                onError={handleOrderError}
+                loading={loading}
+                setLoading={setLoading}
+                clientSecret={clientSecret}
+                setShowPaymentForm={setShowPaymentForm}
+                availableOptions={availableOptions}
+              />
+            </Elements>
+          )}
         </div>
       </section>
 

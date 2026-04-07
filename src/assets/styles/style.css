@@ -3611,6 +3611,17 @@
   padding: 20px 0;
 }
 
+/* Payment block */
+.stripe-payment-form {
+  background-color: #f7f1e7;
+}
+
+.delivery-option {
+  border: 1px solid #8f826f;
+  background-color: #f7f1e7;
+  color: #3c281c;
+}
+
 /* =========================
    RESPONSIVE
 ========================= */
