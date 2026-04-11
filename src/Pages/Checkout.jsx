@@ -36,18 +36,13 @@ const stripePromise = loadStripe(
   "pk_test_51T6ky36nDiic8XlH4wGGMNX2VgNqrXqMBCBx5G0YNwWmCs5MVUkLCCpGitUZcWm35JQ8YcSa2PYzr1lEezzZxuPC00KDmlUv6J",
 );
 
-// Helper function to parse weight range from delivery title
-const parseWeightRange = (title) => {
-  if (!title) return null;
+// Helper function to parse weight range from weight_range field
+const parseWeightRange = (weightRange) => {
+  if (!weightRange) return null;
 
-  console.log("Parsing title:", title);
+  console.log("Parsing weight range:", weightRange);
 
-  let rangePart = title;
-  const parenMatch = title.match(/\(([^)]+)\)/);
-  if (parenMatch) {
-    rangePart = parenMatch[1];
-  }
-
+  // Handle different formats: "0-250g", "250-500g", "1kg-5kg", "500g-1kg"
   const patterns = [
     /(\d+(?:\.\d+)?)\s*(g|kg)?\s*-\s*(\d+(?:\.\d+)?)\s*(g|kg)/i,
     /(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*(g|kg)/i,
@@ -56,7 +51,7 @@ const parseWeightRange = (title) => {
   let min, max, minUnit, maxUnit;
 
   for (const pattern of patterns) {
-    const match = rangePart.match(pattern);
+    const match = weightRange.match(pattern);
     if (match) {
       if (match.length === 5) {
         min = parseFloat(match[1]);
@@ -68,9 +63,9 @@ const parseWeightRange = (title) => {
         max = parseFloat(match[2]);
         maxUnit = match[3];
 
-        if (rangePart.toLowerCase().includes(`${min}kg`)) {
+        if (weightRange.toLowerCase().includes(`${min}kg`)) {
           minUnit = "kg";
-        } else if (rangePart.toLowerCase().includes(`${min}g`)) {
+        } else if (weightRange.toLowerCase().includes(`${min}g`)) {
           minUnit = "g";
         }
       }
@@ -79,13 +74,14 @@ const parseWeightRange = (title) => {
   }
 
   if (min === undefined || max === undefined) {
-    const numbers = rangePart.match(/(\d+(?:\.\d+)?)/g);
+    // Fallback: extract numbers only
+    const numbers = weightRange.match(/(\d+(?:\.\d+)?)/g);
     if (numbers && numbers.length >= 2) {
       min = parseFloat(numbers[0]);
       max = parseFloat(numbers[1]);
 
-      const kgMatch = rangePart.match(/kg/i);
-      const gMatch = rangePart.match(/g(?!\w)/i);
+      const kgMatch = weightRange.toLowerCase().includes("kg");
+      const gMatch = weightRange.toLowerCase().includes("g");
 
       if (kgMatch && !gMatch) {
         maxUnit = "kg";
@@ -97,17 +93,15 @@ const parseWeightRange = (title) => {
   }
 
   if (min === undefined || max === undefined) {
-    console.log("Failed to parse:", title);
+    console.log("Failed to parse weight range:", weightRange);
     return null;
   }
 
+  // Convert everything to grams
   let minWeight = min;
   let maxWeight = max;
 
-  if (
-    minUnit === "kg" ||
-    (minUnit === undefined && min < 100 && rangePart.toLowerCase().includes("kg"))
-  ) {
+  if (minUnit === "kg" || (minUnit === undefined && min < 100 && weightRange.toLowerCase().includes("kg"))) {
     minWeight = min * 1000;
   }
 
@@ -116,7 +110,7 @@ const parseWeightRange = (title) => {
   }
 
   const result = { minWeight, maxWeight };
-  console.log(`Parsed "${title}" -> min: ${minWeight}g, max: ${maxWeight}g`);
+  console.log(`Parsed "${weightRange}" -> min: ${minWeight}g, max: ${maxWeight}g`);
   return result;
 };
 
@@ -128,6 +122,7 @@ const calculateDeliveryChargeFromAPI = (
   if (!deliveryOptions || deliveryOptions.length === 0) return 0;
   if (totalWeight <= 0) return 0;
 
+  // Filter options by delivery type (standard or express)
   const typeOptions = deliveryOptions.filter((option) =>
     option.delivery_title?.toLowerCase().includes(deliveryType.toLowerCase()),
   );
@@ -136,25 +131,32 @@ const calculateDeliveryChargeFromAPI = (
 
   let applicableOption = null;
 
+  // Find the option that matches the weight range
   for (const option of typeOptions) {
-    const range = parseWeightRange(option.delivery_title);
+    // Use weight_range field if available, otherwise fallback to parsing from title
+    const rangeString = option.weight_range || option.delivery_title;
+    const range = parseWeightRange(rangeString);
+    
     if (range) {
       const minWeight = range.minWeight;
       const maxWeight = range.maxWeight;
 
       if (totalWeight >= minWeight && totalWeight <= maxWeight) {
         applicableOption = option;
+        console.log(`Found matching option: ${option.delivery_title} for weight ${totalWeight}g`);
         break;
       }
     }
   }
 
+  // If no exact match found, find the option with the highest max weight
   if (!applicableOption && typeOptions.length > 0) {
     let highestMax = 0;
     let highestOption = null;
 
     for (const option of typeOptions) {
-      const range = parseWeightRange(option.delivery_title);
+      const rangeString = option.weight_range || option.delivery_title;
+      const range = parseWeightRange(rangeString);
       if (range && range.maxWeight > highestMax) {
         highestMax = range.maxWeight;
         highestOption = option;
@@ -163,6 +165,7 @@ const calculateDeliveryChargeFromAPI = (
 
     if (highestOption) {
       applicableOption = highestOption;
+      console.log(`No exact match found, using highest range: ${highestOption.delivery_title}`);
     } else {
       applicableOption = typeOptions[0];
     }
@@ -184,7 +187,10 @@ const getAvailableDeliveryOptions = (totalWeight, deliveryOptions) => {
   let expressOption = null;
 
   for (const option of deliveryOptions) {
-    const range = parseWeightRange(option.delivery_title);
+    // Use weight_range field if available, otherwise fallback to parsing from title
+    const rangeString = option.weight_range || option.delivery_title;
+    const range = parseWeightRange(rangeString);
+    
     if (range) {
       const minWeight = range.minWeight;
       const maxWeight = range.maxWeight;
