@@ -242,81 +242,72 @@ const SuccessModal = ({ isOpen, onClose, orderResult }) => {
     return `${frontendUrl}/invoice/${type}/${token}`;
   };
 
-  const handleViewClick = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
 
-    if (!transaction?.view_url) return;
+const handleViewClick = (e) => {
+  e.preventDefault();
+  e.stopPropagation();
 
-    setViewLoading(true);
-    setError(null);
+  if (!transaction?.view_url) return;
 
-    const token = extractToken(transaction.view_url);
+  setViewLoading(true);
+  setError(null);
 
-    if (!token) {
-      setError("Invalid invoice URL");
-      setViewLoading(false);
-      return;
+  const token = extractToken(transaction.view_url);
+
+  if (!token) {
+    setError("Invalid invoice URL");
+    setViewLoading(false);
+    return;
+  }
+
+  // Use frontend masked URL
+  const maskedUrl = getMaskedUrl(token, "view");
+  
+  // Open in new window
+  const newWindow = window.open(maskedUrl, "_blank", "noopener,noreferrer");
+
+  if (!newWindow) {
+    setViewLoading(false);
+  } else {
+    setTimeout(() => setViewLoading(false), 1200);
+  }
+};
+
+const handleDownloadClick = async (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+
+  if (!transaction?.download_url) return;
+
+  setDownloadLoading(true);
+  setError(null);
+
+  try {
+    const token = extractToken(transaction.download_url);
+    if (!token) throw new Error("Invalid invoice URL");
+
+    // Use frontend masked URL for download
+    const maskedUrl = getMaskedUrl(token, "download");
+    
+    // Open in new window which will trigger download
+    const downloadWindow = window.open(maskedUrl, "_blank");
+    
+    if (!downloadWindow) {
+      throw new Error("Popup blocked. Please allow popups for this site.");
     }
-
-    const maskedUrl = getMaskedUrl(token, "view");
-    const newWindow = window.open(maskedUrl, "_blank", "noopener,noreferrer");
-
-    if (!newWindow) {
-      setViewLoading(false);
-    } else {
-      setTimeout(() => setViewLoading(false), 1200);
-    }
-  };
-
-  const handleDownloadClick = async (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-
-    if (!transaction?.download_url) return;
-
-    setDownloadLoading(true);
-    setError(null);
-
-    try {
-      const token = extractToken(transaction.download_url);
-      if (!token) throw new Error("Invalid invoice URL");
-
-      const response = await fetch(transaction.download_url);
-
-      if (!response.ok) {
-        throw new Error(`Download failed: ${response.statusText}`);
-      }
-
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-
-      const contentDisposition = response.headers.get("Content-Disposition");
-      let filename = `invoice_${orderData?.order_number || "download"}.pdf`;
-
-      if (contentDisposition) {
-        const filenameMatch = contentDisposition.match(
-          /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/,
-        );
-        if (filenameMatch?.[1]) {
-          filename = filenameMatch[1].replace(/['"]/g, "");
-        }
-      }
-
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
-    } catch (err) {
-      console.error("Download error:", err);
-      setError("Failed to download invoice. Please try again.");
-    } finally {
-      setDownloadLoading(false);
-    }
-  };
+    
+    // Close the window after download starts (give it 2 seconds)
+    setTimeout(() => {
+      downloadWindow.close();
+    }, 2000);
+    
+  } catch (err) {
+    console.error("Download error:", err);
+    setError("Failed to download invoice. Please try again.");
+  } finally {
+    setDownloadLoading(false);
+  }
+};
 
   const handleClose = (e) => {
     e.preventDefault();
