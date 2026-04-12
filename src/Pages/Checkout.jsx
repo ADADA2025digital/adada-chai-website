@@ -42,7 +42,6 @@ const parseWeightRange = (weightRange) => {
 
   console.log("Parsing weight range:", weightRange);
 
-  // Handle different formats: "0-250g", "250-500g", "1kg-5kg", "500g-1kg"
   const patterns = [
     /(\d+(?:\.\d+)?)\s*(g|kg)?\s*-\s*(\d+(?:\.\d+)?)\s*(g|kg)/i,
     /(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*(g|kg)/i,
@@ -74,7 +73,6 @@ const parseWeightRange = (weightRange) => {
   }
 
   if (min === undefined || max === undefined) {
-    // Fallback: extract numbers only
     const numbers = weightRange.match(/(\d+(?:\.\d+)?)/g);
     if (numbers && numbers.length >= 2) {
       min = parseFloat(numbers[0]);
@@ -97,7 +95,6 @@ const parseWeightRange = (weightRange) => {
     return null;
   }
 
-  // Convert everything to grams
   let minWeight = min;
   let maxWeight = max;
 
@@ -122,7 +119,6 @@ const calculateDeliveryChargeFromAPI = (
   if (!deliveryOptions || deliveryOptions.length === 0) return 0;
   if (totalWeight <= 0) return 0;
 
-  // Filter options by delivery type (standard or express)
   const typeOptions = deliveryOptions.filter((option) =>
     option.delivery_title?.toLowerCase().includes(deliveryType.toLowerCase()),
   );
@@ -131,9 +127,7 @@ const calculateDeliveryChargeFromAPI = (
 
   let applicableOption = null;
 
-  // Find the option that matches the weight range
   for (const option of typeOptions) {
-    // Use weight_range field if available, otherwise fallback to parsing from title
     const rangeString = option.weight_range || option.delivery_title;
     const range = parseWeightRange(rangeString);
     
@@ -149,7 +143,6 @@ const calculateDeliveryChargeFromAPI = (
     }
   }
 
-  // If no exact match found, find the option with the highest max weight
   if (!applicableOption && typeOptions.length > 0) {
     let highestMax = 0;
     let highestOption = null;
@@ -187,7 +180,6 @@ const getAvailableDeliveryOptions = (totalWeight, deliveryOptions) => {
   let expressOption = null;
 
   for (const option of deliveryOptions) {
-    // Use weight_range field if available, otherwise fallback to parsing from title
     const rangeString = option.weight_range || option.delivery_title;
     const range = parseWeightRange(rangeString);
     
@@ -961,6 +953,23 @@ const Checkout = () => {
     postalCode: "",
     country: DEFAULT_COUNTRY,
     paymentMethod: "stripe",
+    fullAddress: "",
+  });
+
+  const [fieldErrors, setFieldErrors] = useState({
+    firstName: "",
+    lastName: "",
+    email: "",
+    phone: "",
+    fullAddress: "",
+  });
+
+  const [touched, setTouched] = useState({
+    firstName: false,
+    lastName: false,
+    email: false,
+    phone: false,
+    fullAddress: false,
   });
 
   const [cartItems, setCartItems] = useState([]);
@@ -969,7 +978,6 @@ const Checkout = () => {
   const [success, setSuccess] = useState(null);
   const [orderResult, setOrderResult] = useState(null);
   const [showModal, setShowModal] = useState(false);
-  const [addressError, setAddressError] = useState("");
   const [clientSecret, setClientSecret] = useState(null);
   const [showPaymentForm, setShowPaymentForm] = useState(false);
   const [selectedDeliveryType, setSelectedDeliveryType] = useState("standard");
@@ -979,6 +987,42 @@ const Checkout = () => {
 
   const [captchaToken, setCaptchaToken] = useState("");
   const [captchaError, setCaptchaError] = useState("");
+
+  // Validation functions
+  const validateFirstName = (value) => {
+    if (!value || !value.trim()) return "First name is required";
+    const nameRegex = /^[A-Za-z]+$/;
+    if (!nameRegex.test(value.trim())) return "First name must contain only letters (A-Z, a-z)";
+    return "";
+  };
+
+  const validateLastName = (value) => {
+    if (!value || !value.trim()) return "Last name is required";
+    const nameRegex = /^[A-Za-z]+$/;
+    if (!nameRegex.test(value.trim())) return "Last name must contain only letters (A-Z, a-z)";
+    return "";
+  };
+
+  const validateEmail = (value) => {
+    if (!value || !value.trim()) return "Email address is required";
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(value.trim())) return "Please enter a valid email address (e.g., name@example.com)";
+    return "";
+  };
+
+  const validatePhone = (value) => {
+    if (!value || !value.trim()) return "Phone number is required";
+    const phoneRegex = /^\+?[1-9]\d{1,14}$/;
+    const cleanPhone = value.trim().replace(/[\s\-\(\)]/g, "");
+    if (!phoneRegex.test(cleanPhone)) return "Please enter a valid phone number (e.g., 1234567890 or +1234567890)";
+    return "";
+  };
+
+  const validateFullAddress = (value) => {
+    if (!value || !value.trim()) return "Please enter your full address";
+    if (value.trim().length < 10) return "Please enter a complete address";
+    return "";
+  };
 
   const handleCheckoutCaptchaChange = (token) => {
     setCaptchaToken(token || "");
@@ -1083,9 +1127,6 @@ const Checkout = () => {
 
     if (!apiKey) {
       console.error("Google Maps API key is missing!");
-      setAddressError(
-        "Address autocomplete is unavailable. Please enter your address manually.",
-      );
       return;
     }
 
@@ -1100,9 +1141,6 @@ const Checkout = () => {
         setGoogleMapsLoaded(true);
       } else {
         console.error("Google Maps loaded but Places API not available");
-        setAddressError(
-          "Address service partially loaded. Please enter address manually.",
-        );
       }
       delete window.initGoogleMaps;
     };
@@ -1113,7 +1151,6 @@ const Checkout = () => {
     script.defer = true;
     script.onerror = (error) => {
       console.error("Failed to load Google Maps:", error);
-      setAddressError("Unable to load address service. Please enter address manually.");
       delete window.initGoogleMaps;
     };
 
@@ -1150,7 +1187,6 @@ const Checkout = () => {
 
       if (!window.google || !window.google.maps || !window.google.maps.places) {
         console.error("Google Maps Places API not available");
-        setAddressError("Address service unavailable. Please enter address manually.");
         return false;
       }
 
@@ -1181,19 +1217,15 @@ const Checkout = () => {
             handlePlaceSelect(place);
           } else {
             console.warn("No place details available");
-            setAddressError("Please select an address from the dropdown");
+            setFieldErrors(prev => ({ ...prev, fullAddress: "Please select a valid address from the dropdown" }));
           }
         });
 
         autocompleteRef.current = autocomplete;
-        setAddressError("");
         console.log("Autocomplete initialized successfully!");
         return true;
       } catch (err) {
         console.error("Error creating Autocomplete:", err);
-        setAddressError(
-          "Failed to initialize address autocomplete. Please enter address manually.",
-        );
         return false;
       }
     };
@@ -1205,9 +1237,6 @@ const Checkout = () => {
         retryCount++;
       } else {
         console.error("Max retries reached, autocomplete not initialized");
-        setAddressError(
-          "Address autocomplete not available. Please enter your address manually.",
-        );
         if (retryInterval) clearInterval(retryInterval);
       }
     };
@@ -1322,11 +1351,61 @@ const Checkout = () => {
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
+    
+    // Real-time validation for touched fields
+    if (touched[name]) {
+      let error = "";
+      switch (name) {
+        case "firstName":
+          error = validateFirstName(value);
+          break;
+        case "lastName":
+          error = validateLastName(value);
+          break;
+        case "email":
+          error = validateEmail(value);
+          break;
+        case "phone":
+          error = validatePhone(value);
+          break;
+        default:
+          break;
+      }
+      setFieldErrors((prev) => ({ ...prev, [name]: error }));
+    }
+  };
+
+  const handleBlur = (fieldName) => {
+    setTouched((prev) => ({ ...prev, [fieldName]: true }));
+    
+    let error = "";
+    switch (fieldName) {
+      case "firstName":
+        error = validateFirstName(formData.firstName);
+        break;
+      case "lastName":
+        error = validateLastName(formData.lastName);
+        break;
+      case "email":
+        error = validateEmail(formData.email);
+        break;
+      case "phone":
+        error = validatePhone(formData.phone);
+        break;
+      case "fullAddress":
+        error = validateFullAddress(formData.fullAddress);
+        break;
+      default:
+        break;
+    }
+    setFieldErrors((prev) => ({ ...prev, [fieldName]: error }));
   };
 
   const handlePlaceSelect = (place) => {
     try {
-      if (!place?.address_components) return;
+      if (!place?.address_components) {
+        return;
+      }
 
       const getComponent = (type) => {
         const component = place.address_components.find((c) =>
@@ -1350,71 +1429,57 @@ const Checkout = () => {
           ? `${streetNumber} ${route}`
           : route || streetNumber || "";
 
+      const fullAddressString = place.formatted_address || "";
+
       setFormData((prev) => ({
         ...prev,
         streetNo: streetNumber,
         streetName: fullStreetName,
-        suburb,
-        state,
+        suburb: suburb,
+        state: state,
+        postalCode: postalCode,
         country: country || DEFAULT_COUNTRY,
-        postalCode,
+        fullAddress: fullAddressString,
+      }));
+
+      // Clear address error
+      setFieldErrors((prev) => ({
+        ...prev,
+        fullAddress: "",
       }));
 
       if (addressInputRef.current) {
-        addressInputRef.current.value = place.formatted_address || "";
+        addressInputRef.current.value = fullAddressString;
       }
-
-      setAddressError("");
     } catch (err) {
       console.error("Error in handlePlaceSelect:", err);
     }
   };
 
-  const validateAddress = () => {
-    try {
-      if (
-        formData.streetName &&
-        formData.suburb &&
-        formData.state &&
-        formData.postalCode
-      ) {
-        return true;
-      }
+  const validateAllFields = () => {
+    const fullAddressValue = addressInputRef.current?.value?.trim() || formData.fullAddress;
+    
+    const errors = {
+      firstName: validateFirstName(formData.firstName),
+      lastName: validateLastName(formData.lastName),
+      email: validateEmail(formData.email),
+      phone: validatePhone(formData.phone),
+      fullAddress: validateFullAddress(fullAddressValue),
+    };
 
-      const manualAddress = addressInputRef.current?.value?.trim();
+    setFieldErrors(errors);
+    
+    // Mark all fields as touched
+    setTouched({
+      firstName: true,
+      lastName: true,
+      email: true,
+      phone: true,
+      fullAddress: true,
+    });
 
-      if (manualAddress && manualAddress.length > 5) {
-        const addressParts = manualAddress
-          .split(",")
-          .map((part) => part.trim());
-
-        if (addressParts.length >= 3) {
-          const stateAndPostcode = addressParts[addressParts.length - 1]
-            ?.trim()
-            ?.split(/\s+/);
-
-          const derivedState = stateAndPostcode?.[0] || "";
-          const derivedPostcode = stateAndPostcode?.[1] || "";
-
-          setFormData((prev) => ({
-            ...prev,
-            streetNo: prev.streetNo || "",
-            streetName: prev.streetName || addressParts[0] || "",
-            suburb: prev.suburb || addressParts[1] || "",
-            state: prev.state || derivedState,
-            postalCode: prev.postalCode || derivedPostcode,
-            country: prev.country || DEFAULT_COUNTRY,
-          }));
-
-          return true;
-        }
-      }
-
-      return false;
-    } catch (err) {
-      console.error("validateAddress error:", err);
-      return false;
-    }
+    // Check if any errors exist
+    return !Object.values(errors).some(error => error !== "");
   };
 
   const decreaseQty = (id) => {
@@ -1443,46 +1508,73 @@ const Checkout = () => {
   };
 
   const initializePayment = async () => {
-    if (!validateAddress()) {
-      setError("Please enter a complete address");
+    // Clear previous errors
+    setError(null);
+    setCaptchaError("");
+
+    // Validate all fields
+    const isValid = validateAllFields();
+
+    if (!isValid) {
+      // Scroll to the first error
+      const firstErrorField = Object.keys(fieldErrors).find(
+        key => fieldErrors[key]
+      );
+      if (firstErrorField === "fullAddress" && addressInputRef.current) {
+        addressInputRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        addressInputRef.current.focus();
+      } else if (firstErrorField) {
+        const element = document.querySelector(`[name="${firstErrorField}"]`);
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          element.focus();
+        }
+      }
       return;
     }
 
+    // Validate address components are complete
+    if (!formData.streetName || !formData.suburb || !formData.state || !formData.postalCode) {
+      setFieldErrors(prev => ({ ...prev, fullAddress: "Please select a complete address from the dropdown" }));
+      setError("Please select a complete address from the dropdown");
+      return;
+    }
+
+    // Validate reCAPTCHA
     if (!captchaToken) {
       setCaptchaError("Please verify the reCAPTCHA before proceeding to payment.");
       return;
     }
 
-    if (
-      !formData.firstName ||
-      !formData.lastName ||
-      !formData.email ||
-      !formData.phone
-    ) {
-      setError("Please fill in all required fields");
-      return;
-    }
-
+    // Check if cart is empty
     if (cartItems.length === 0) {
       setError("Your cart is empty");
       return;
     }
 
+    // Validate delivery options
+    if (!availableOptions?.standard && !availableOptions?.express) {
+      setError("No delivery options available for your cart weight. Please contact support.");
+      return;
+    }
+
+    // All validations passed - proceed with payment
     setLoading(true);
     setError(null);
 
     try {
-      const fullAddress = addressInputRef.current?.value?.trim() || "";
+      const cleanPhone = formData.phone.trim().replace(/[\s\-\(\)]/g, "");
+      const fullAddress = addressInputRef.current?.value?.trim() || formData.fullAddress;
 
       const payload = {
-        full_name: `${formData.firstName} ${formData.lastName}`.trim(),
-        email: formData.email,
-        ph_number: formData.phone,
-        address_line1: fullAddress || formData.streetName,
-        address_line2: formData.streetNo,
-        city: formData.suburb,
-        state: formData.state,
-        postal_code: formData.postalCode,
+        full_name: `${formData.firstName.trim()} ${formData.lastName.trim()}`.trim(),
+        email: formData.email.trim(),
+        ph_number: cleanPhone,
+        address_line1: fullAddress,
+        address_line2: formData.streetNo?.trim() || "",
+        city: formData.suburb.trim(),
+        state: formData.state.trim(),
+        postal_code: formData.postalCode.trim(),
         country: formData.country,
         delivery_charge: deliveryCharge,
         delivery_type: selectedDeliveryType,
@@ -1530,6 +1622,23 @@ const Checkout = () => {
       postalCode: "",
       country: DEFAULT_COUNTRY,
       paymentMethod: "stripe",
+      fullAddress: "",
+    });
+
+    setFieldErrors({
+      firstName: "",
+      lastName: "",
+      email: "",
+      phone: "",
+      fullAddress: "",
+    });
+
+    setTouched({
+      firstName: false,
+      lastName: false,
+      email: false,
+      phone: false,
+      fullAddress: false,
     });
 
     if (addressInputRef.current) {
@@ -1564,9 +1673,9 @@ const Checkout = () => {
 
   const formatWeight = (weightGrams) => {
     if (weightGrams >= 1000) {
-      return `${(weightGrams / 1000).toFixed(2)} kg`;
+      return `${(weightGrams / 1000).toFixed(2)}kg`;
     }
-    return `${weightGrams} g`;
+    return `${weightGrams}g`;
   };
 
   const hasZeroWeightItems = useMemo(() => {
@@ -1685,13 +1794,17 @@ const Checkout = () => {
                       <input
                         type="text"
                         name="firstName"
-                        className="form-control checkout-input"
-                        placeholder="ex: Roja"
+                        className={`form-control checkout-input ${fieldErrors.firstName && touched.firstName ? 'is-invalid' : ''}`}
+                        placeholder="Enter your first name"
                         value={formData.firstName}
                         onChange={handleChange}
+                        onBlur={() => handleBlur("firstName")}
                         required
                         disabled={loading}
                       />
+                      {fieldErrors.firstName && touched.firstName && (
+                        <div className="invalid-feedback d-block">{fieldErrors.firstName}</div>
+                      )}
                     </div>
 
                     <div className="mb-3">
@@ -1699,13 +1812,17 @@ const Checkout = () => {
                       <input
                         type="text"
                         name="lastName"
-                        className="form-control checkout-input"
-                        placeholder="ex: Kumar"
+                        className={`form-control checkout-input ${fieldErrors.lastName && touched.lastName ? 'is-invalid' : ''}`}
+                        placeholder="Enter your last name"
                         value={formData.lastName}
                         onChange={handleChange}
+                        onBlur={() => handleBlur("lastName")}
                         required
                         disabled={loading}
                       />
+                      {fieldErrors.lastName && touched.lastName && (
+                        <div className="invalid-feedback d-block">{fieldErrors.lastName}</div>
+                      )}
                     </div>
 
                     <div className="mb-3">
@@ -1713,13 +1830,17 @@ const Checkout = () => {
                       <input
                         type="email"
                         name="email"
-                        className="form-control checkout-input"
-                        placeholder="ex: roja123@gmail.com"
+                        className={`form-control checkout-input ${fieldErrors.email && touched.email ? 'is-invalid' : ''}`}
+                        placeholder="Enter your email"
                         value={formData.email}
                         onChange={handleChange}
+                        onBlur={() => handleBlur("email")}
                         required
                         disabled={loading}
                       />
+                      {fieldErrors.email && touched.email && (
+                        <div className="invalid-feedback d-block">{fieldErrors.email}</div>
+                      )}
                     </div>
 
                     <div className="mb-3">
@@ -1727,13 +1848,17 @@ const Checkout = () => {
                       <input
                         type="tel"
                         name="phone"
-                        className="form-control checkout-input"
-                        placeholder="ex: 12345678"
+                        className={`form-control checkout-input ${fieldErrors.phone && touched.phone ? 'is-invalid' : ''}`}
+                        placeholder="Enter your phone number"
                         value={formData.phone}
                         onChange={handleChange}
+                        onBlur={() => handleBlur("phone")}
                         required
                         disabled={loading}
                       />
+                      {fieldErrors.phone && touched.phone && (
+                        <div className="invalid-feedback d-block">{fieldErrors.phone}</div>
+                      )}
                     </div>
 
                     <div className="checkout-divider"></div>
@@ -1741,24 +1866,29 @@ const Checkout = () => {
                     <div className="pb-2">
                       <div className="checkout-badge mb-3">Address</div>
 
-                      {addressError && (
-                        <div className="alert alert-warning mb-3">
-                          {addressError}
-                        </div>
-                      )}
-
                       <div className="mb-3">
-                        <label className="checkout-label">Address *</label>
+                        <label className="checkout-label">Full Address *</label>
                         <input
                           ref={addressInputRef}
                           type="text"
-                          className="form-control checkout-input"
+                          name="fullAddress"
+                          className={`form-control checkout-input ${fieldErrors.fullAddress && touched.fullAddress ? 'is-invalid' : ''}`}
                           placeholder="Start typing your address..."
                           autoComplete="off"
                           disabled={loading}
+                          onChange={(e) => {
+                            setFormData(prev => ({ ...prev, fullAddress: e.target.value }));
+                            if (fieldErrors.fullAddress) {
+                              setFieldErrors(prev => ({ ...prev, fullAddress: "" }));
+                            }
+                          }}
+                          onBlur={() => handleBlur("fullAddress")}
                         />
+                        {fieldErrors.fullAddress && touched.fullAddress && (
+                          <div className="invalid-feedback d-block">{fieldErrors.fullAddress}</div>
+                        )}
                         <small className="text-muted">
-                          Enter your street address, city, or postcode
+                          Enter your full address (Google Autocomplete enabled)
                         </small>
                       </div>
 
@@ -1775,19 +1905,12 @@ const Checkout = () => {
                         )}
                       </div>
 
+                      {/* Hidden fields for storing address components */}
                       <input type="hidden" name="streetNo" value={formData.streetNo} />
-                      <input
-                        type="hidden"
-                        name="streetName"
-                        value={formData.streetName}
-                      />
+                      <input type="hidden" name="streetName" value={formData.streetName} />
                       <input type="hidden" name="suburb" value={formData.suburb} />
                       <input type="hidden" name="state" value={formData.state} />
-                      <input
-                        type="hidden"
-                        name="postalCode"
-                        value={formData.postalCode}
-                      />
+                      <input type="hidden" name="postalCode" value={formData.postalCode} />
                       <input type="hidden" name="country" value={formData.country} />
                     </div>
                   </div>
@@ -1855,7 +1978,7 @@ const Checkout = () => {
                                 </button>
                               </div>
                               {item.weight > 0 && (
-                                <small className="text-muted">
+                                <small className="text-muted ms-1">
                                   Weight: {formatWeight(item.weight)}
                                 </small>
                               )}
@@ -1984,9 +2107,9 @@ const Checkout = () => {
                       </div>
                     )}
 
-                    <div className="checkout-grand-total d-flex justify-content-between mb-3 pt-2 border-top">
+                    <div className="checkout-grand-total d-flex justify-content-between mb-3 pt-2 border-top fs-5">
                       <span className="fw-bold">TOTAL:</span>
-                      <strong className="fs-5">
+                      <strong>
                         ${cartItems.length > 0 ? grandTotal.toFixed(2) : "0.00"}
                       </strong>
                     </div>
