@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import Banner from "../Components/Banner";
 import ShopCard from "../Components/ShopCard.jsx";
+import ShopCardSkeleton from "../Components/ShopCardSkeleton.jsx";
 import bannerBg from "../assets/images/about-banner.png";
 import smicon from "../assets/images/smicon.png";
 import { FaSearch } from "react-icons/fa";
@@ -217,26 +218,33 @@ const Shop = () => {
     navigate(`/product/${createProductSlug(product)}`);
   };
 
-  // Show loading state
-  if (loading) {
-    return (
-      <div className="container-fluid p-0">
-        <Banner
-          title="SHOP"
-          subtitle="Hot chai, always ready."
-          breadcrumb="HOME > SHOP"
-          bgImage={bannerBg}
-        />
-        <section className="shop-page-section">
-          <div className="container text-center py-5">
-            <div className="spinner-border" role="status">
-              <span className="visually-hidden">Loading...</span>
-            </div>
+if (loading) {
+  return (
+    <div className="container-fluid p-0">
+      <Banner
+        title="SHOP"
+        subtitle="Hot chai, always ready."
+        breadcrumb="HOME > SHOP"
+        bgImage={bannerBg}
+      />
+
+      <section className="shop-page-section">
+        <div className="container">
+          <div className="row pt-4 pt-md-5 gx-3 gy-4 gy-md-5">
+            {Array.from({ length: 8 }).map((_, index) => (
+              <div
+                key={index}
+                className="col-12 col-sm-6 col-md-6 col-lg-4 col-xl-3 py-5 d-flex justify-content-center"
+              >
+                <ShopCardSkeleton />
+              </div>
+            ))}
           </div>
-        </section>
-      </div>
-    );
-  }
+        </div>
+      </section>
+    </div>
+  );
+}
 
   // Show error state
   if (error) {

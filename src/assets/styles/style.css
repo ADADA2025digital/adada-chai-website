@@ -4332,3 +4332,85 @@
 .checkout-badge.mb-3 {
   margin-bottom: 18px !important;
 }
+
+/* Skeleton Base */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    #e0e0e0 25%,
+    #f5f5f5 50%,
+    #e0e0e0 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+  border-radius: 6px;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+/* Card Skeleton */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    #f3e2c7 0%,
+    #e6c08a 25%,
+    #d8a24a 50%,
+    #e6c08a 75%,
+    #f3e2c7 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.6s infinite ease-in-out;
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton-card {
+  max-width: 235px;
+}
+
+.skeleton-image {
+  width: 200px;
+  height: 160px;
+  margin-top: -75px; 
+}
+
+/* FLOATING BUTTON */
+.skeleton-badge {
+  right: 6px;
+  bottom: -15px;
+  width: 46px;
+  height: 46px;
+}
+
+/* Text */
+.skeleton-title {
+  height: 14px;
+  width: 80%;
+  margin-bottom: 10px;
+}
+
+.skeleton-text {
+  height: 10px;
+  width: 100%;
+  margin-bottom: 6px;
+}
+
+.skeleton-text.short {
+  width: 60%;
+}
+
+.skeleton-price {
+  height: 12px;
+  width: 40%;
+  margin-top: 8px;
+}

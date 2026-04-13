@@ -1673,25 +1673,7 @@ const Checkout = () => {
     return cartItems.some((item) => item.weight === 0);
   }, [cartItems]);
 
-  if (deliveryOptionsLoading) {
-    return (
-      <>
-        <Banner
-          title="CHECKOUT"
-          subtitle="Tea first. Everything else later."
-          breadcrumb="HOME > CHECKOUT"
-          bgImage={bannerBg}
-        />
-        <div className="container py-5 text-center">
-          <div className="spinner-border text-primary" role="status">
-            <span className="visually-hidden">Loading delivery options...</span>
-          </div>
-          <p className="mt-3">Loading checkout...</p>
-        </div>
-      </>
-    );
-  }
-
+  // Loading UI removed - direct return of main content
   return (
     <>
       <Banner
